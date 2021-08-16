@@ -9,7 +9,8 @@ function RunGitCommandSafely() {
 
         [Parameter(Mandatory=$False)]
 		[Int]$changedFileCount = 0)
-    # LogInfo "Executing command [$($gitCommand)]"
+    $gitCommand = "$($gitCommand) | Out-Null"
+    LogInfo "Executing command [$($gitCommand)]"
     Invoke-Expression $gitCommand;
     [bool]$execStatus = $?;
 	If ($execStatus) {
@@ -85,7 +86,7 @@ function DoesBranchExistOnRemoteOrigin() {
 }
 
 function UpdateBranchesInfoFromRemote() {
-	RunGitCommandSafely -gitCommand "git fetch -pq | Out-Null"
+	RunGitCommandSafely -gitCommand "git fetch -pq"
 }
 
 function GetCurrentBranchName() {
@@ -102,7 +103,7 @@ function StashChangesAndGetChangedFileCount() {
         LogSuccess "No files changed -> no stashing"
     } Else {
         LogWarning "Stashing $($allChangedFiles.Count) changed files"
-        RunGitCommandSafely -gitCommand "git stash --include-untracked | Out-Null"
+        RunGitCommandSafely -gitCommand "git stash --include-untracked"
     }
     return $allChangedFiles.Count;
 }

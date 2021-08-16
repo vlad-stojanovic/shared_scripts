@@ -31,7 +31,7 @@ If ($gitInitialBranch -Ne $mergeSourceBranchName) {
 
 If (DoesBranchExistOnRemoteOrigin -branchName $pullBranchName) {
 	# Update the branch (pull new changes)
-	RunGitCommandSafely -gitCommand "git pull -q | Out-Null" -changedFileCount $gitFilesChanged
+	RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged
 } Else {
 	# Branch does not exist on the remote origin - we cannot perform git pull
 	LogWarning "git pull not possible for local branch [$($pullBranchName)]"
@@ -40,7 +40,7 @@ If (DoesBranchExistOnRemoteOrigin -branchName $pullBranchName) {
 # If we weren't initially on merge source branch then switch back and merge
 If ($gitInitialBranch -Ne $mergeSourceBranchName) {
 	RunGitCommandSafely -gitCommand "git checkout $gitInitialBranch" -changedFileCount $gitFilesChanged
-	RunGitCommandSafely -gitCommand "git merge $mergeSourceBranchName | Out-Null" -changedFileCount $gitFilesChanged
+	RunGitCommandSafely -gitCommand "git merge $mergeSourceBranchName" -changedFileCount $gitFilesChanged
 	If (ConfirmAction "Rebase to $($mergeSourceBranchName) and reset/squash other committed changes visible in the PR") {
 		RunGitCommandSafely -gitCommand "git rebase origin/$($mergeSourceBranchName)" -changedFileCount $gitFilesChanged
 		RunGitCommandSafely -gitCommand "git push --force" -changedFileCount $gitFilesChanged
