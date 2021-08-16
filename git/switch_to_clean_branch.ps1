@@ -8,7 +8,7 @@ Param(
 If ([string]::IsNullOrWhiteSpace($branchName)) {
 	LogWarning "Available Git branches:"
 	git branch
-	ScriptFailure "Branch name is required\n\t$(Split-Path -Path $PSCommandPath -Leaf) -branchName BRANCH_NAME"
+	ScriptFailure "Branch name is required`n`t$(Split-Path -Path $PSCommandPath -Leaf) -branchName BRANCH_NAME"
 }
 
 UpdateBranchesInfoFromRemote
