@@ -11,6 +11,13 @@ If ([string]::IsNullOrWhiteSpace($branchName)) {
 	ScriptFailure "Branch name is required`n`t$(Split-Path -Path $PSCommandPath -Leaf) -branchName BRANCH_NAME"
 }
 
+# Get current git branch
+[string]$gitInitialBranch = GetCurrentBranchName
+[string]$branchFullName = GetBranchFullName -branchName $branchName
+If ($gitInitialBranch -Eq $branchName -Or $gitInitialBranch -Eq $branchFullName) {
+	ScriptExit -exitStatus 0 -message "Already on branch [$($gitInitialBranch)]"
+}
+
 UpdateBranchesInfoFromRemote
 
 # Stash initial changes to enable pull/merge/checkout
@@ -21,25 +28,25 @@ RunGitCommandSafely -gitCommand "git reset --hard origin/master" -changedFileCou
 
 # Check whether the provided branch exists
 $existingBranchName = GetExistingBranchName $branchName
-If ([string]::IsNullOrWhiteSpace($existingBranchName)) {
-	$branchName = GetBranchFullName -branchName $branchName
-	
-	If (ConfirmAction -question "Create new branch [$($branchName)])") {
-		RunGitCommandSafely -gitCommand "git checkout -b $($branchName)" -changedFileCount $gitFilesChanged;
-		LogSuccess "Successfully created new branch [$($branchName)]"
+# Do not use the branchName variable directly anymore
+Remove-Variable -Name branchName
+
+If ([string]::IsNullOrWhiteSpace($existingBranchName)) {	
+	If (ConfirmAction -question "Create new branch [$($branchFullName)])") {
+		RunGitCommandSafely -gitCommand "git checkout -b $($branchFullName)" -changedFileCount $gitFilesChanged;
+		LogSuccess "Successfully created new branch [$($branchFullName)]"
 	} Else {
-		LogWarning "Skipped creating new branch [$($branchName)]"
+		LogWarning "Skipped creating new branch [$($branchFullName)]"
 	}
 } Else {
-	$branchName = $existingBranchName
-	LogWarning "Switching to existing branch [$($branchName)]"
-	RunGitCommandSafely -gitCommand "git checkout $($branchName)" -changedFileCount $gitFilesChanged
-	If (DoesBranchExistOnRemoteOrigin -branchName $branchName) {
+	LogWarning "Switching to existing branch [$($existingBranchName)]"
+	RunGitCommandSafely -gitCommand "git checkout $($existingBranchName)" -changedFileCount $gitFilesChanged
+	If (DoesBranchExistOnRemoteOrigin -branchName $existingBranchName) {
 		RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged
 	} Else {
-		LogWarning "Branch [$($branchName)] does not exist in remote origin. Skipping pull."
+		LogWarning "Branch [$($existingBranchName)] does not exist in remote origin. Skipping pull."
 	}
-	LogSuccess "Successfully switched to existing branch [$($branchName)]"
+	LogSuccess "Successfully switched to existing branch [$($existingBranchName)]"
 }
 
 # Stash pop initial changes
