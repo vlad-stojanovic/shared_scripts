@@ -9,9 +9,8 @@ function RunGitCommandSafely() {
 
         [Parameter(Mandatory=$False)]
 		[Int]$changedFileCount = 0)
-    $gitCommand = "$($gitCommand) | Out-Null"
     LogInfo "Executing command [$($gitCommand)]"
-    Invoke-Expression $gitCommand;
+    Invoke-Expression "$($gitCommand) | Out-Null";
     [bool]$execStatus = $?;
 	If ($execStatus) {
         LogSuccess "Command [$($gitCommand)] successful" 
