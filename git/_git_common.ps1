@@ -26,6 +26,14 @@ function RunGitCommandSafely() {
     }
 }
 
+function GetDefaultBranchName() {
+    [string]$defaultBranchName = git rev-parse --abbrev-ref HEAD
+    If ([string]::IsNullOrWhiteSpace($defaultBranchName)) {
+        ScriptFailure "Could not find default branch name"
+    }
+    return $defaultBranchName
+}
+
 function GetBranchFullName() {
     Param(
         [Parameter(Mandatory=$True)]
@@ -41,7 +49,7 @@ function GetBranchFullName() {
 	}
 
     # If the branch name is already in the correct format simply return it
-    If ($branchName.StartsWith("dev/") -Or ($branchName -Eq "master")) {
+    If ($branchName.StartsWith("dev/") -Or ($branchName -Eq $(GetDefaultBranchName))) {
         return $branchName;
     } 
 

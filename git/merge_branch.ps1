@@ -1,6 +1,6 @@
 Param(
 	[Parameter(Mandatory=$False)]
-	[string]$mergeSourceBranchName = "master",
+	[string]$mergeSourceBranchName = $Null,
 
 	[Parameter(Mandatory=$False)]
 	[string]$commit = $Null,
@@ -20,7 +20,12 @@ UpdateBranchesInfoFromRemote
 # Stash initial changes to enable pull/merge/checkout
 $gitFilesChanged = StashChangesAndGetChangedFileCount
 
-$mergeSourceBranchName = GetExistingBranchName -branchName $mergeSourceBranchName
+If ([string]::IsNullOrWhiteSpace($mergeSourceBranchName)) {
+	$mergeSourceBranchName = GetDefaultBranchName
+} Else {
+	$mergeSourceBranchName = GetExistingBranchName -branchName $mergeSourceBranchName
+}
+
 If ([string]::IsNullOrWhiteSpace($mergeSourceBranchName)) {
 	ScriptFailure "Merge source branch is required!"
 }

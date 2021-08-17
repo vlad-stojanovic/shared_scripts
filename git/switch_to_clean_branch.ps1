@@ -24,7 +24,7 @@ UpdateBranchesInfoFromRemote
 $gitFilesChanged = StashChangesAndGetChangedFileCount
 
 # Reset all commits worked on the current branch
-RunGitCommandSafely -gitCommand "git reset --hard origin/master" -changedFileCount $gitFilesChanged
+RunGitCommandSafely -gitCommand "git reset --hard origin/$(GetDefaultBranchName)" -changedFileCount $gitFilesChanged
 
 # Check whether the provided branch exists
 $existingBranchName = GetExistingBranchName $branchName

@@ -8,10 +8,10 @@ UpdateBranchesInfoFromRemote
 $deletedBranchRegex = "((: )|(\[))gone\]"
 [string[]]$currentBranchesDeleted = git branch --verbose | Where-Object { $_ -imatch "\*.*$($deletedBranchRegex)" } | ForEach-Object { $_.Trim().Split()[1] }
 If ($currentBranchesDeleted.Count -Gt 0) {
-	# Switch to master branch to enable deletion of the current branch
+	# Switch to default branch to enable deletion of the current branch
 	# which is deleted from the remote origin
 	LogWarning "Switching away from current branch [$($currentBranchesDeleted[0])] which is deleted from the remote origin"
-	RunGitCommandSafely "git checkout master"
+	RunGitCommandSafely "git checkout $(GetDefaultBranchName)"
 }
 
 [string[]]$allDeletedBranches = git branch --verbose | Where-Object { $_ -imatch $deletedBranchRegex } | ForEach-Object { $_.Trim().Split()[0] }

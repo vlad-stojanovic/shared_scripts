@@ -8,7 +8,9 @@ Param(
 # Get current git branch
 $gitInitialBranch = GetCurrentBranchName
 
-[string[]]$diffFiles = git diff origin/master --name-only
+$defaultBranchName = GetDefaultBranchName
+
+[string[]]$diffFiles = git diff origin/$defaultBranchName --name-only
 If ($diffFiles.Count -Eq 0) {
 	ScriptExit -exitStatus 0 -message "No diff files found on branch [$($gitInitialBranch)]"
 }
@@ -28,7 +30,7 @@ ForEach ($diffFile in $diffFiles) {
 
 	$fileName = Split-Path -Path $diffFile -Leaf
 	If (ConfirmAction "Reset file #$($count)/$($diffFiles.Count) [$($fileName)])") {
-		RunGitCommandSafely "(git checkout origin/master -- `"$($diffFile)`") -Or (git rm `"$($diffFile)`")"
+		RunGitCommandSafely "(git checkout origin/$($defaultBranchName) -- `"$($diffFile)`") -Or (git rm `"$($diffFile)`")"
 		LogSuccess "`tReset file [$($fileName)]"
 	} Else {
 		LogInfo "\tSkipping reset of file [$($fileName)]"
