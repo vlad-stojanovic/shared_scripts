@@ -1,8 +1,14 @@
+Param(
+	[Parameter(Mandatory=$False)]
+	[switch]$skipRemoteBranchInfoUpdate)
+
 # Include git helper functions
 . "$($PSScriptRoot)/_git_common.ps1"
 
-# Update list of branches from remote origin
-UpdateBranchesInfoFromRemote
+If (-Not $skipRemoteBranchInfoUpdate.IsPresent) {
+	# Update list of branches from remote origin
+	UpdateBranchesInfoFromRemote
+}
 
 # List all branches & filter only the branches deleted from the remote origin
 $deletedBranchRegex = "((: )|(\[))gone\]"

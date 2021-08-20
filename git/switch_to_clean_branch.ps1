@@ -1,6 +1,9 @@
 Param(
 	[Parameter(Mandatory=$False)]
-	[string]$branchName = $Null)
+	[string]$branchName = $Null,
+	
+	[Parameter(Mandatory=$False)]
+	[switch]$skipRemoteBranchInfoUpdate)
 
 # Include git helper functions
 . "$($PSScriptRoot)/_git_common.ps1"
@@ -18,7 +21,9 @@ If ($gitInitialBranch -Eq $branchName -Or $gitInitialBranch -Eq $branchFullName)
 	ScriptExit -exitStatus 0 -message "Already on branch [$($gitInitialBranch)]"
 }
 
-UpdateBranchesInfoFromRemote
+If (-Not $skipRemoteBranchInfoUpdate.IsPresent) {
+	UpdateBranchesInfoFromRemote
+}
 
 # Stash initial changes to enable pull/merge/checkout
 $gitFilesChanged = StashChangesAndGetChangedFileCount

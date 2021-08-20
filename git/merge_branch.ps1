@@ -6,7 +6,10 @@ Param(
 	[string]$commit = $Null,
 
 	[Parameter(Mandatory=$False)]
-	[switch]$rebase)
+	[switch]$rebase,
+	
+	[Parameter(Mandatory=$False)]
+	[switch]$skipRemoteBranchInfoUpdate)
 
 # Include git helper functions
 . "$($PSScriptRoot)/_git_common.ps1"
@@ -14,8 +17,11 @@ Param(
 # Get current git branch
 $gitInitialBranch = GetCurrentBranchName
 
-# Update list of branches from remote origin
-UpdateBranchesInfoFromRemote
+
+If (-Not $skipRemoteBranchInfoUpdate.IsPresent) {
+	# Update list of branches from remote origin
+	UpdateBranchesInfoFromRemote
+}
 
 # Stash initial changes to enable pull/merge/checkout
 $gitFilesChanged = StashChangesAndGetChangedFileCount
