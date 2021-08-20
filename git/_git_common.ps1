@@ -27,7 +27,8 @@ function RunGitCommandSafely() {
 }
 
 function GetDefaultBranchName() {
-    [string]$defaultBranchName = git rev-parse --abbrev-ref HEAD
+    # Parsing via Select-String e.g. 'origin/default' to 'default'
+    [string]$defaultBranchName = git rev-parse --abbrev-ref origin/HEAD | Select-String -Pattern '[^\/]*$' | ForEach-Object { $_.Matches[0].Value }
     If ([string]::IsNullOrWhiteSpace($defaultBranchName)) {
         ScriptFailure "Could not find default branch name"
     }
