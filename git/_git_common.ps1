@@ -22,7 +22,7 @@ function RunGitCommandSafely() {
         If ($changedFileCount -gt 0) {
             LogWarning "Remember to run 'git stash pop' to restore $($changedFileCount) changed files"
         }
-        ScriptExit $execStatus "Command [$($gitCommand)] failed with $($execStatus)" 
+        ScriptFailure "Command [$($gitCommand)] failed with $($execStatus)" 
     }
 }
 
