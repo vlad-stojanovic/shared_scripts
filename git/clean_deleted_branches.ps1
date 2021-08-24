@@ -17,7 +17,7 @@ If ($currentBranchesDeleted.Count -Gt 0) {
 	# Switch to default branch to enable deletion of the current branch
 	# which is deleted from the remote origin
 	LogWarning "Switching away from current branch [$($currentBranchesDeleted[0])] which is deleted from the remote origin"
-	RunGitCommandSafely "git checkout $(GetDefaultBranchName)"
+	Invoke-Expression "$($PSScriptRoot)\switch_to_clean_branch.ps1 -branchName $(GetDefaultBranchName) -skipRemoteBranchInfoUpdate"
 }
 
 [string[]]$allDeletedBranches = git branch --verbose | Where-Object { $_ -imatch $deletedBranchRegex } | ForEach-Object { $_.Trim().Split()[0] }
