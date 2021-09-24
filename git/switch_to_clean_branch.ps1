@@ -3,7 +3,10 @@ Param(
 	[string]$branchName = $Null,
 	
 	[Parameter(Mandatory=$False)]
-	[switch]$skipRemoteBranchInfoUpdate)
+	[switch]$skipRemoteBranchInfoUpdate,
+	
+	[Parameter(Mandatory=$False)]
+	[switch]$skipPullOnNewBranch)
 
 # Include git helper functions
 . "$($PSScriptRoot)/_git_common.ps1"
@@ -46,8 +49,12 @@ If ([string]::IsNullOrWhiteSpace($existingBranchName)) {
 } Else {
 	LogWarning "Switching to existing branch [$($existingBranchName)]"
 	RunGitCommandSafely -gitCommand "git checkout $($existingBranchName)" -changedFileCount $gitFilesChanged
-	If (DoesBranchExistOnRemoteOrigin -branchName $existingBranchName) {
-		RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged
+	If (DoesBranchExistOnRemoteOrigin -fullBranchName $existingBranchName) {
+		If ($skipPullOnNewBranch.IsPresent) {
+			LogWarning "Skipping pull on the switched branch, please merge/pull manually afterwards"
+		} Else {
+			RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged
+		}
 	} Else {
 		LogWarning "Branch [$($existingBranchName)] does not exist in remote origin. Skipping pull."
 	}

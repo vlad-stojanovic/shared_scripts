@@ -16,8 +16,10 @@ $deletedBranchRegex = "((: )|(\[))gone\]"
 If ($currentBranchesDeleted.Count -Gt 0) {
 	# Switch to default branch to enable deletion of the current branch
 	# which is deleted from the remote origin
+	[string]$defaultBranchName = GetDefaultBranchName
 	LogWarning "Switching away from current branch [$($currentBranchesDeleted[0])] which is deleted from the remote origin"
-	Invoke-Expression "$($PSScriptRoot)\switch_to_clean_branch.ps1 -branchName $(GetDefaultBranchName) -skipRemoteBranchInfoUpdate"
+	LogWarning "NOTE: The default branch [$defaultBranchName] will not be automatically updated!`nIf needed - merge/pull manually afterwards"
+	Invoke-Expression "$($PSScriptRoot)\switch_to_clean_branch.ps1 -branchName $($defaultBranchName) -skipRemoteBranchInfoUpdate -skipPullOnNewBranch"
 }
 
 [string[]]$allDeletedBranches = git branch --verbose | Where-Object { $_ -imatch $deletedBranchRegex } | ForEach-Object { $_.Trim().Split()[0] }

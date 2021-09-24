@@ -78,10 +78,10 @@ function GetExistingBranchName() {
 		[string[]]$matchedBranches = $allBranches | Where-Object { $inputBranchName -Eq ($_) }
 		# Check whether the provided branch exists
 		If ($matchedBranches.Count -Gt 1) {
-			LogError "Found $($matchedBranches.Count) branches matching input [$($branchName)]";
-			return $Null;
+			LogError "Found $($matchedBranches.Count) branches matching input [$($inputBranchName)]"
+			return $Null
 		} ElseIf ($matchedBranches.Count -Eq 1) {
-			return $matchedBranches[0];
+			return $inputBranchName
 		}
 	}
 
@@ -92,15 +92,21 @@ function DoesBranchExistOnRemoteOrigin() {
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
-		[string]$branchName)
+		[string]$fullBranchName)
 
-	$existingBranchName = GetExistingBranchName -branchName $branchName;
-	[string[]]$remoteBranches = git branch -a | Where-Object { $_ -imatch "^\s*remotes/origin/$($existingBranchName)$" }
-	return $remoteBranches.Count -Gt 0;
+	[string[]]$remoteBranches = git branch -a | Where-Object { $_ -imatch "^\s*remotes/origin/$($fullBranchName)$" }
+	return $remoteBranches.Count -Gt 0
 }
 
 function UpdateBranchesInfoFromRemote() {
-	RunGitCommandSafely -gitCommand "git fetch -pq"
+	[UInt16]$jobCount = 1
+	If ([System.Environment]::ProcessorCount -Ge 3) {
+		# Take 2/3 of the available processors
+		$jobCount = [System.Environment]::ProcessorCount * 2 / 3
+	}
+
+	LogWarning "If 'git fetch' takes a long time - best to first`n`t- clean up loose objects via 'git prune' or`n`t- optimize the local repo via 'git gc'"
+	RunGitCommandSafely -gitCommand "git fetch -pq --jobs=$($jobCount)"
 }
 
 function GetCurrentBranchName() {

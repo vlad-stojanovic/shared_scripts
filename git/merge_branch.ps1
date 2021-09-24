@@ -17,7 +17,6 @@ Param(
 # Get current git branch
 $gitInitialBranch = GetCurrentBranchName
 
-
 If (-Not $skipRemoteBranchInfoUpdate.IsPresent) {
 	# Update list of branches from remote origin
 	UpdateBranchesInfoFromRemote
@@ -43,7 +42,7 @@ If ($gitInitialBranch -Ne $mergeSourceBranchName) {
 	$pullBranchName = $mergeSourceBranchName
 }
 
-If (DoesBranchExistOnRemoteOrigin -branchName $pullBranchName) {
+If (DoesBranchExistOnRemoteOrigin -fullBranchName $pullBranchName) {
 	If ([string]::IsNullOrWhiteSpace($commit)) {
 		# Update the branch (pull new changes)
 		RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged
