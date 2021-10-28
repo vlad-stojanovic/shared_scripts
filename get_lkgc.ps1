@@ -17,7 +17,7 @@ Param(
 	[switch]$ignoreCache)
 
 # Include common helper functions
-. "$($PSScriptRoot)/../common/_common.ps1"
+. "$($PSScriptRoot)/common/_common.ps1"
 
 $ErrorActionPreference = "Stop"
 
@@ -173,7 +173,7 @@ $parsedXml = [XML]$buildStatusTable
 [System.Xml.XmlElement[]]$matchingRows = $allValidRows | `
 	Where-Object { isRowForASuccessfulBuild -row $_ -project $project }
 If ($Null -Eq $matchingRows -Or $matchingRows.Count -Eq 0) {
-	ScriptFailure "Did not find any successful builds, is the logic in this script wrong?"
+	ScriptFailure "Did not find any successful builds, try increasing the lookback period or checking the URI manually (is the logic in this script wrong?)."
 }
 
 [System.Xml.XmlElement]$matchingRow = $matchingRows[0]

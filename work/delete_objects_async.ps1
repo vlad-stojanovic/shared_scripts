@@ -1,9 +1,9 @@
 Param(
+	[Parameter(Mandatory=$True)]
+	[string[]]$dirsToDelete,
+
 	[Parameter(Mandatory=$False)]
 	[string]$rootDir,
-	
-	[Parameter(Mandatory=$False)]
-	[string[]]$dirsToDelete = @("debug", "obj", "out", "testbin"),
 
 	[Parameter(Mandatory=$False)]
 	[UInt16]$waitTimeS = 5)
@@ -11,7 +11,7 @@ Param(
 # Include common helper functions
 . "$($PSScriptRoot)/../common/_common.ps1"
 
-$StopWatch =  [System.Diagnostics.StopWatch]::StartNew()
+[System.Diagnostics.StopWatch]$stopWatch = [System.Diagnostics.StopWatch]::StartNew()
 
 $jobMap = @{}
 
@@ -25,7 +25,7 @@ ForEach ($dir in $dirsToDelete) {
 		LogWarning "Deleting entries from [$($targetDir)] directory"
 		$job = Start-Job -ScriptBlock {
 				Param([string]$targetDir)
-				Remove-Item -Path $targetDir -Recurse -Force
+				Remove-Item -Path $targetDir -Recurse -Force -ErrorAction SilentlyContinue
 			} -ArgumentList $targetDir -Name "Removal of [$($targetDir)] directory"
 		$jobMap.Add($dir, $job.Id)
 	} Else {
@@ -47,7 +47,7 @@ Do {
 	ForEach ($dir in $dirs) {
 		$job = Get-Job -Id $jobMap[$dir]
 		If ("Completed" -Eq $job.State) {
-			LogSuccess "Done with [$($dir)] after $($StopWatch.Elapsed.ToString())"
+			LogSuccess "Done with [$($dir)] after $($stopWatch.Elapsed.ToString('hh\:mm\:ss'))"
 			$jobResult = Receive-Job -Job $job -AutoRemoveJob -Wait
 			If (-Not [string]::IsNullOrWhiteSpace($jobResult)) {
 				LogInfo "Results:`n$($jobResult)"
@@ -62,6 +62,6 @@ Do {
 	}
 } While ($jobMap.Count -Gt 0)
 
-$StopWatch.Stop()
+$stopWatch.Stop()
 LogNewLine
-LogSuccess "Deletion finished in $($StopWatch.Elapsed.ToString())"
+LogSuccess "Deletion finished in $($stopWatch.Elapsed.ToString('hh\:mm\:ss'))"

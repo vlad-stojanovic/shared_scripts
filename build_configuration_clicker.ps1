@@ -11,7 +11,7 @@ Param(
 	[int]$keyIterations = 50)
 
 # Include common helper functions
-. "$($PSScriptRoot)/../common/_common.ps1"
+. "$($PSScriptRoot)/common/_common.ps1"
 
 If (-Not (ConfirmAction "Did you open Build configuration in Visual Studio and selected/highlighted the first 'Build' checkbox" -defaultYes)) {
 	ScriptFailure "Please perform the necessary steps first"

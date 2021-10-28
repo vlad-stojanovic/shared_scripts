@@ -9,22 +9,13 @@ function RunGitCommandSafely() {
 
 		[Parameter(Mandatory=$False)]
 		[Int]$changedFileCount = 0)
-	LogInfo "Executing command [$($gitCommand)]"
-	[bool]$execStatus = $False;
-	[string]$errorMessage = "";
-	Try {
-		$execStatus = Invoke-Expression "$($gitCommand) | Out-Null; `$?";
-	} Catch {
-		$errorMessage = $_.Exception.Message
-		$execStatus = $False;
-	}
-	If ($execStatus) {
-		LogSuccess "Command [$($gitCommand)] successful" 
-	} Else {
+	[bool]$execStatus = RunCommand $gitCommand -silentCommandExecution -getExecStatus
+	If (-Not $execStatus) {
 		If ($changedFileCount -gt 0) {
 			LogWarning "Remember to run 'git stash pop' to restore $($changedFileCount) changed files"
 		}
-		ScriptFailure "Command [$($gitCommand)] failed with $($errorMessage)" 
+
+		ScriptFailure "Git command failed"
 	}
 }
 
@@ -46,23 +37,23 @@ function GetBranchFullName() {
 	function getGitUserName() {
 		$gitUserName = git config credential.username;
 		If ([String]::IsNullOrWhiteSpace($gitUserName)) {
-			return [System.Environment]::UserName;
+			return [System.Environment]::UserName
 		}
-		return $gitUserName;
+		return $gitUserName
 	}
 
 	# If the branch name is already in the correct format simply return it
 	If ($branchName.StartsWith("dev/") -Or ($branchName -Eq $(GetDefaultBranchName))) {
-		return $branchName;
+		return $branchName
 	} 
 
 	# Prefix the branch name with the username before creating it,
 	# if it isn't already prefixed properly
 	$gitUserName = getGitUserName;
-	If ($branchName.StartsWith($gitUserName)) {
-		return "dev/$($branchName)";
+	If ($branchName.StartsWith("$($gitUserName)/")) {
+		return "dev/$($branchName)"
 	} Else {
-		return "dev/$($gitUserName)/$($branchName)";
+		return "dev/$($gitUserName)/$($branchName)"
 	}
 }
 
@@ -88,14 +79,38 @@ function GetExistingBranchName() {
 	return $Null;
 }
 
+function GetCodeVersion() {
+	Param(
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[string]$fullBranchName,
+
+		[Parameter(Mandatory=$False)]
+		[switch]$short,
+		
+		[Parameter(Mandatory=$False)]
+		[switch]$remote)
+	[System.Text.StringBuilder]$sbCommand = [System.Text.StringBuilder]::new()
+	$sbCommand.Append("git rev-parse --verify --quiet ") | Out-Null
+	If ($short.IsPresent) {
+		$sbCommand.Append("--short ") | Out-Null
+	}
+	If ($remote.IsPresent) {
+		$sbCommand.Append("remotes/origin/") | Out-Null
+	}
+	$sbCommand.Append($fullBranchName) | Out-Null
+	[string]$codeVersion = Invoke-Expression -Command $sbCommand.ToString()
+	return $codeVersion
+}
+
 function DoesBranchExistOnRemoteOrigin() {
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
 		[string]$fullBranchName)
 
-	[string[]]$remoteBranches = git branch -a | Where-Object { $_ -imatch "^\s*remotes/origin/$($fullBranchName)$" }
-	return $remoteBranches.Count -Gt 0
+	[string]$remoteCodeVersion = GetCodeVersion -fullBranchName $fullBranchName -remote
+	return (-Not [string]::IsNullOrWhiteSpace($remoteCodeVersion))
 }
 
 function UpdateBranchesInfoFromRemote() {

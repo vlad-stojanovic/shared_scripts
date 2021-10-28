@@ -22,9 +22,6 @@ If (-Not $skipRemoteBranchInfoUpdate.IsPresent) {
 	UpdateBranchesInfoFromRemote
 }
 
-# Stash initial changes to enable pull/merge/checkout
-$gitFilesChanged = StashChangesAndGetChangedFileCount
-
 If ([string]::IsNullOrWhiteSpace($mergeSourceBranchName)) {
 	$mergeSourceBranchName = GetDefaultBranchName
 } Else {
@@ -34,6 +31,24 @@ If ([string]::IsNullOrWhiteSpace($mergeSourceBranchName)) {
 If ([string]::IsNullOrWhiteSpace($mergeSourceBranchName)) {
 	ScriptFailure "Merge source branch is required!"
 }
+
+[string]$currentCodeVersionFull = GetCodeVersion -fullBranchName $mergeSourceBranchName
+If (-Not [string]::IsNullOrWhiteSpace($commit)) {
+	# If a target commit is provided then check both short and full current code versions.
+	[string]$currentCodeVersionShort = GetCodeVersion -fullBranchName $mergeSourceBranchName -short
+	If ($currentCodeVersionFull -IEq $commit -Or $currentCodeVersionShort -IEq $commit) {
+		ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on code version $($commit)"
+	}
+} Else {
+	# If no commit is provided then check the latest version.
+	[string]$remoteCodeVersionFull = GetCodeVersion -fullBranchName $mergeSourceBranchName -remote
+	If ($currentCodeVersionFull -IEq $remoteCodeVersionFull) {
+		ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on the latest code version $($currentCodeVersionFull)"
+	}
+}
+
+# Stash initial changes to enable pull/merge/checkout
+$gitFilesChanged = StashChangesAndGetChangedFileCount
 
 # If we aren't already on the merge source branch then switch
 $pullBranchName = $gitInitialBranch

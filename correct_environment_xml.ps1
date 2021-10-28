@@ -5,7 +5,7 @@ Param(
 	[string]$environmentFilePath)
 
 # Include common helper functions
-. "$($PSScriptRoot)/../common/_common.ps1"
+. "$($PSScriptRoot)/common/_common.ps1"
 
 function getCmsQuery() {
 	Param(
