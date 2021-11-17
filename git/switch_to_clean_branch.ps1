@@ -28,28 +28,32 @@ If (-Not $skipRemoteBranchInfoUpdate.IsPresent) {
 	UpdateBranchesInfoFromRemote
 }
 
+# Check whether the provided branch exists
+$existingBranchName = GetExistingBranchName $branchName
+# Do not use the branchName variable directly anymore
+Remove-Variable -Name branchName
+
+If ([string]::IsNullOrWhiteSpace($existingBranchName)) {
+	# If the branch does not exist then first check whether we want to create a new branch
+	# otherwise fail immediately and perform no other preparation actions below e.g. 'git stash'
+	If (-Not (ConfirmAction -question "Create new branch [$($branchFullName)])")) {
+		ScriptFailure "Skipped creating new branch [$($branchFullName)]"
+	}
+}
+
 # Stash initial changes to enable pull/merge/checkout
 $gitFilesChanged = StashChangesAndGetChangedFileCount
 
 # Reset all commits worked on the current branch
 RunGitCommandSafely -gitCommand "git reset --hard origin/$(GetDefaultBranchName)" -changedFileCount $gitFilesChanged
 
-# Check whether the provided branch exists
-$existingBranchName = GetExistingBranchName $branchName
-# Do not use the branchName variable directly anymore
-Remove-Variable -Name branchName
-
-If ([string]::IsNullOrWhiteSpace($existingBranchName)) {	
-	If (ConfirmAction -question "Create new branch [$($branchFullName)])") {
-		RunGitCommandSafely -gitCommand "git checkout -b $($branchFullName)" -changedFileCount $gitFilesChanged;
-		LogSuccess "Successfully created new branch [$($branchFullName)]"
-	} Else {
-		LogWarning "Skipped creating new branch [$($branchFullName)]"
-	}
+If ([string]::IsNullOrWhiteSpace($existingBranchName)) {
+	RunGitCommandSafely -gitCommand "git checkout -b $($branchFullName)" -changedFileCount $gitFilesChanged;
+	LogSuccess "Successfully created new branch [$($branchFullName)]"
 } Else {
 	LogWarning "Switching to existing branch [$($existingBranchName)]"
 	RunGitCommandSafely -gitCommand "git checkout $($existingBranchName)" -changedFileCount $gitFilesChanged
-	If (DoesBranchExistOnRemoteOrigin -fullBranchName $existingBranchName) {
+	If (DoesBranchExist -fullBranchName $existingBranchName -origin remote) {
 		If ($skipPullOnNewBranch.IsPresent) {
 			LogWarning "Skipping pull on the switched branch, please merge/pull manually afterwards"
 		} Else {

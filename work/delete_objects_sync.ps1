@@ -17,7 +17,7 @@ ForEach ($dir in $dirsToDelete) {
 	If (Test-Path -Path $targetDir -PathType Container) {
 		# Do not use Remove-Item because of issues with symlinks in older PS versions (fixed in Dec 2019)
 		# https://github.com/PowerShell/PowerShell/issues/621
-		RunCommand "CMD /C 'RD /Q/S `"$($targetDir)`"'" -silentCommandExecution
+		RunCommand "RD /Q/S `"$($targetDir)`"" -useCmd -silentCommandExecution
 	} Else {
 		LogInfo "Folder does not exist [$($targetDir)]"
 	}

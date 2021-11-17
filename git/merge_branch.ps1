@@ -32,18 +32,22 @@ If ([string]::IsNullOrWhiteSpace($mergeSourceBranchName)) {
 	ScriptFailure "Merge source branch is required!"
 }
 
-[string]$currentCodeVersionFull = GetCodeVersion -fullBranchName $mergeSourceBranchName
-If (-Not [string]::IsNullOrWhiteSpace($commit)) {
-	# If a target commit is provided then check both short and full current code versions.
-	[string]$currentCodeVersionShort = GetCodeVersion -fullBranchName $mergeSourceBranchName -short
-	If ($currentCodeVersionFull -IEq $commit -Or $currentCodeVersionShort -IEq $commit) {
-		ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on code version $($commit)"
-	}
-} Else {
-	# If no commit is provided then check the latest version.
-	[string]$remoteCodeVersionFull = GetCodeVersion -fullBranchName $mergeSourceBranchName -remote
-	If ($currentCodeVersionFull -IEq $remoteCodeVersionFull) {
-		ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on the latest code version $($currentCodeVersionFull)"
+# Check for remote code version only if we are merging from the current branch,
+# otherwise the commit IDs will not match (current vs merge-source branch).
+If ($gitInitialBranch -Eq $mergeSourceBranchName) {
+	[string]$currentCodeVersionFull = GetCodeVersion -fullBranchName $mergeSourceBranchName
+	If (-Not [string]::IsNullOrWhiteSpace($commit)) {
+		# If a target commit is provided then check both short and full current code versions.
+		[string]$currentCodeVersionShort = GetCodeVersion -fullBranchName $mergeSourceBranchName -short
+		If ($currentCodeVersionFull -IEq $commit -Or $currentCodeVersionShort -IEq $commit) {
+			ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on code version $($commit)"
+		}
+	} Else {
+		# If no commit is provided then check the latest version.
+		[string]$remoteCodeVersionFull = GetCodeVersion -fullBranchName $mergeSourceBranchName -remote
+		If ($currentCodeVersionFull -IEq $remoteCodeVersionFull) {
+			ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on the latest code version $($currentCodeVersionFull)"
+		}
 	}
 }
 
@@ -57,7 +61,7 @@ If ($gitInitialBranch -Ne $mergeSourceBranchName) {
 	$pullBranchName = $mergeSourceBranchName
 }
 
-If (DoesBranchExistOnRemoteOrigin -fullBranchName $pullBranchName) {
+If (DoesBranchExist -fullBranchName $pullBranchName -origin remote) {
 	If ([string]::IsNullOrWhiteSpace($commit)) {
 		# Update the branch (pull new changes)
 		RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged

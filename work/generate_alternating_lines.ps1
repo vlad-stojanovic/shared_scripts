@@ -1,13 +1,17 @@
 [CmdletBinding()]
 Param(
+	[Parameter(Mandatory=$True, HelpMessage="Output directory")]
+	[ValidateNotNullOrEmpty()]
+	[string]$directory,
+
 	[Parameter(Mandatory=$False, HelpMessage="Output file path prefix")]
-	[string]$filePathPrefix = "temp",
+	[string]$filePathPrefix = $Null,
 
 	[Parameter(Mandatory=$False, HelpMessage="Output file extension e.g. 'csv'")]
 	[string]$fileExtension = "csv",
 
 	[Parameter(Mandatory=$False, HelpMessage="Number of lines to generate")]
-	[int]$numberOfLines = 5,
+	[int]$numberOfLines = 10,
 
 	[Parameter(Mandatory=$False, HelpMessage="Item delimiter within the line e.g. ',' or ';'")]
 	[string]$itemDelimiter = ',',
@@ -16,7 +20,7 @@ Param(
 	[int]$numberOfRandomWords = 1,
 
 	[Parameter(Mandatory=$False, HelpMessage="Random word of this length will be added (if greater than zero)")]
-	[int]$randomWordLength = 100)
+	[UInt64]$randomWordLength = 100)
 
 [int]$global:KB = 1000
 [int]$global:MB = $global:KB * $global:KB
@@ -30,12 +34,12 @@ Param(
 function GetSizeString() {
 	Param(
 		[Parameter(Mandatory=$True)]
-		[int]$size,
+		[UInt64]$size,
 
 		[Parameter(Mandatory=$False)]
 		[string]$unit = "")
 
-	[int]$sizeFactor = 1
+	[UInt64]$sizeFactor = 1
 	[string]$unitPrefix = ""
 	If ($size -Ge $global:GB) {
 		$sizeFactor = $global:GB
@@ -47,7 +51,7 @@ function GetSizeString() {
 		$sizeFactor = $global:KB
 		$unitPrefix = "K"
 	}
-	return "$([int][Math]::Floor($size / $sizeFactor))$($unitPrefix)$($unit)"
+	return "$([UInt64][Math]::Floor($size / $sizeFactor))$($unitPrefix)$($unit)"
 }
 
 function AppendItem() {
@@ -89,20 +93,23 @@ function AppendItem() {
 	}
 }
 
-[char[]]$alphaLetters = @(
-	'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-	'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z')
-[char[]]$alphaNumLetters = $alphaLetters + @('1', '2', '3', '4', '5', '6', '7', '8', '9', '0')
-[string]$randomWordSizeString = GetSizeString -size $randomWordLength -unit 'B'
-[string]$filePath = "$($filePathPrefix)_$($randomWordSizeString)x$($numberOfRandomWords)-words_$(GetSizeString -size $numberOfLines -unit '')-lines.$($fileExtension)"
+If (-Not (Test-Path -Path $directory -PathType Container)) {
+	ScriptFailure "Output directory not found @ [$($directory)]"
+}
 
-If (Test-Path -Path $filePath) {
-	LogInfo "Removing existing file [$($filePath)]"
-	Remove-Item -Path $filePath
+If ($numberOfLines % 2 -Ne 0) {
+	ScriptFailure "Number of lines must be even"
+}
+
+[string]$randomWordSizeString = GetSizeString -size $randomWordLength -unit 'B'
+[string]$filePath = Join-Path -Path $directory -ChildPath "$($filePathPrefix)lob-$($randomWordSizeString)_columns-$($numberOfRandomWords)_lines-$(GetSizeString -size $numberOfLines).$($fileExtension)"
+
+If (Test-Path -Path $filePath -PathType Leaf) {
+	ScriptFailure "File already exists @ [$($filePath)]"
 }
 
 [int]$fileWriteThreshold = $global:MB
-[int]$estimatedLineLength = $global:KB + $numberOfRandomWords * $randomWordLength
+[UInt64]$estimatedLineLength = $global:KB + $numberOfRandomWords * $randomWordLength
 [int]$sbCapacity = [Math]::Min($estimatedLineLength * $numberOfLines, $fileWriteThreshold * 2)
 [System.Text.StringBuilder]$bufferSb = [System.Text.StringBuilder]::new($sbCapacity)
 
@@ -139,21 +146,26 @@ For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 	# Add ID as the first item, w/o delimiter
 	AppendItem -sb $bufferSb -item $lineNumber.ToString()
 
-	# Add a three-alpha-letter code for each line, as the second item
-	$code = [string]::new((Get-Random -InputObject $alphaLetters -Count 3))
-	AppendItem -sb $bufferSb -item $code -delimiter $itemDelimiter
+	# Add code as the second item, invalid in every second line.
+	If ($lineNumber % 2 -Eq 0) {
+		AppendItem -sb $bufferSb -item "NaN" -delimiter $itemDelimiter
+	} Else {
+		AppendItem -sb $bufferSb -item $lineNumber.ToString() -delimiter $itemDelimiter
+	}
 
-	For ($addedWords = 0; $addedWords -Lt $numberOfRandomWords; $addedWords++) {
+	For ($currentWord = 1; $currentWord -Le $numberOfRandomWords; $currentWord++) {
 		# Add delimiter before creating the next random word
 		AppendItem -sb $bufferSb -delimiter $itemDelimiter
-
-		$currentWordLength = 0
+		[string]$wordBlock = "row $($lineNumber) - word 1KB - number $($currentWord) of $($numberOfRandomWords) - - - "
+		[UInt64]$currentWordLength = 0
 		While ($currentWordLength -Lt $randomWordLength) {
-			# Randomize the letters array and append to the random word builder
-			$letterLimit = [Math]::Min($randomWordLength - $currentWordLength, $alphaNumLetters.Count)
-			$randomLetters = [string]::new((Get-Random -InputObject $alphaNumLetters -Count $letterLimit))
-			$currentWordLength += $randomLetters.Length
-			AppendItem -filePath $filePath -fileWriteThreshold $fileWriteThreshold -sb $bufferSb -item $randomLetters
+			[int]$letterLimit = [Math]::Min($randomWordLength - $currentWordLength, $wordBlock.Length)
+			$currentWordLength += $letterLimit
+			If ($letterLimit -Lt $wordBlock.Length) {
+				AppendItem -filePath $filePath -fileWriteThreshold $fileWriteThreshold -sb $bufferSb -item $wordBlock.Substring(0, $letterLimit)
+			} Else {
+				AppendItem -filePath $filePath -fileWriteThreshold $fileWriteThreshold -sb $bufferSb -item $wordBlock
+			}
 		}
 	}
 

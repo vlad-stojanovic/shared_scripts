@@ -208,8 +208,12 @@ If ([string]::IsNullOrWhiteSpace($commitHash)) {
 }
 
 If ($sync.IsPresent) {
-	LogInfo "Syncing to $($commitHash)...`n"
-	Invoke-Expression "$($PSScriptRoot)\git\merge_branch.ps1 -commit $($commitHash)"
+	LogWarning "Syncing to $($commitHash)... Please restart the CoreXT console manually afterwards`n"
+	& "$($PSScriptRoot)\git\merge_branch.ps1" -commit $commitHash
+
+	If (ConfirmAction "Delete build folders (for a clean new build)") {
+		delete_build_folders
+	}
 } Else {
 	# Print commit hash to be used as a return value from this script,
 	# potentially used in another script automation e.g. update source code to this commit

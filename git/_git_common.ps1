@@ -57,28 +57,6 @@ function GetBranchFullName() {
 	}
 }
 
-function GetExistingBranchName() {
-	Param(
-		[Parameter(Mandatory=$True)]
-		[ValidateNotNullOrEmpty()]
-		[string]$branchName)
-
-	[string[]]$inputBranchNames = @($branchName, $(GetBranchFullName -branchName $branchName));
-	[string[]]$allBranches = $(git branch) -replace "(^(\*?)[ \t]+)|([ \t]+$)", "" | Where-Object { -Not [string]::IsNullOrWhiteSpace($_)}
-	ForEach ($inputBranchName in $inputBranchNames) {
-		[string[]]$matchedBranches = $allBranches | Where-Object { $inputBranchName -Eq ($_) }
-		# Check whether the provided branch exists
-		If ($matchedBranches.Count -Gt 1) {
-			LogError "Found $($matchedBranches.Count) branches matching input [$($inputBranchName)]"
-			return $Null
-		} ElseIf ($matchedBranches.Count -Eq 1) {
-			return $inputBranchName
-		}
-	}
-
-	return $Null;
-}
-
 function GetCodeVersion() {
 	Param(
 		[Parameter(Mandatory=$True)]
@@ -103,14 +81,34 @@ function GetCodeVersion() {
 	return $codeVersion
 }
 
-function DoesBranchExistOnRemoteOrigin() {
+function DoesBranchExist() {
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
-		[string]$fullBranchName)
+		[string]$fullBranchName,
+		
+		[Parameter(Mandatory=$True)]
+		[ValidateSet("local", "remote")]
+		[string]$origin)
+	[string]$codeVersion = GetCodeVersion -fullBranchName $fullBranchName -remote:($origin -Eq "remote")
+	return (-Not [string]::IsNullOrWhiteSpace($codeVersion))
+}
 
-	[string]$remoteCodeVersion = GetCodeVersion -fullBranchName $fullBranchName -remote
-	return (-Not [string]::IsNullOrWhiteSpace($remoteCodeVersion))
+function GetExistingBranchName() {
+	Param(
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[string]$branchName)
+	[string[]]$inputBranchNames = @($branchName, $(GetBranchFullName -branchName $branchName));
+	ForEach ($inputBranchName in $inputBranchNames) {
+		# Check whether the provided branch exists locally or remotely
+		If ((DoesBranchExist -fullBranchName $inputBranchName -origin local) -Or
+			(DoesBranchExist -fullBranchName $inputBranchName -origin remote)) {
+			return $inputBranchName
+		}
+	}
+
+	return $Null
 }
 
 function UpdateBranchesInfoFromRemote() {
