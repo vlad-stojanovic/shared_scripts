@@ -22,39 +22,13 @@ Param(
 	[Parameter(Mandatory=$False, HelpMessage="Random word of this length will be added (if greater than zero)")]
 	[UInt64]$randomWordLength = 100)
 
-[int]$global:KB = 1000
-[int]$global:MB = $global:KB * $global:KB
-[int]$global:GB = $global:KB * $global:MB
-
 [int]$global:FileWriteCount = 0
 
 # Include common helper functions
 . "$($PSScriptRoot)/../common/_common.ps1"
 
-function GetSizeString() {
-	Param(
-		[Parameter(Mandatory=$True)]
-		[UInt64]$size,
-
-		[Parameter(Mandatory=$False)]
-		[string]$unit = "")
-
-	[UInt64]$sizeFactor = 1
-	[string]$unitPrefix = ""
-	If ($size -Ge $global:GB) {
-		$sizeFactor = $global:GB
-		$unitPrefix = "G"
-	} ElseIf ($size -Ge $global:MB) {
-		$sizeFactor = $global:MB
-		$unitPrefix = "M"
-	} ElseIf ($size -Ge $global:KB) {
-		$sizeFactor = $global:KB
-		$unitPrefix = "K"
-	}
-	return "$([UInt64][Math]::Floor($size / $sizeFactor))$($unitPrefix)$($unit)"
-}
-
 function AppendItem() {
+	[OutputType([System.Void])]
 	Param(
 		[Parameter(Mandatory=$True)]
 		[System.Text.StringBuilder]$sb,
@@ -74,7 +48,7 @@ function AppendItem() {
 		[Parameter(Mandatory=$False)]
 		[switch]$forceFileWrite)
 
-	If ($sb.Length -Gt 0 -And (-Not [string]::IsNullOrEmpty($delimiter))) {
+	If (-Not [string]::IsNullOrEmpty($delimiter)) {
 		[void]$sb.Append($delimiter)
 	}
 
@@ -108,15 +82,22 @@ If (Test-Path -Path $filePath -PathType Leaf) {
 	ScriptFailure "File already exists @ [$($filePath)]"
 }
 
-[int]$fileWriteThreshold = $global:MB
-[UInt64]$estimatedLineLength = $global:KB + $numberOfRandomWords * $randomWordLength
-[int]$sbCapacity = [Math]::Min($estimatedLineLength * $numberOfLines, $fileWriteThreshold * 2)
-[System.Text.StringBuilder]$bufferSb = [System.Text.StringBuilder]::new($sbCapacity)
+[string]$fileDirectory = Split-Path $filePath -Parent
+If (-Not (Test-Path -Path $fileDirectory -PathType Container)) {
+	New-Item -Path $fileDirectory -ItemType Directory
+}
+
+[int]$kiloByte = 1000
+[int]$fileWriteThreshold = $kiloByte * $kiloByte
+[UInt64]$estimatedLineLength = $kiloByte + $numberOfRandomWords * $randomWordLength
+[System.Text.StringBuilder]$bufferSb = [System.Text.StringBuilder]::new($fileWriteThreshold * 2)
 
 [int]$logLineCadence = 1
 # Ensure at most 100 logs
-While ($estimatedLineLength -Lt $fileWriteThreshold -And $logLineCadence * 100 -Lt $numberOfLines) {
-	$logLineCadence *= 10
+If ($estimatedLineLength -Lt [UInt64]$fileWriteThreshold) {
+	While ($logLineCadence * 100 -Lt $numberOfLines) {
+		$logLineCadence *= 10
+	}
 }
 
 # Add header line
@@ -127,6 +108,10 @@ For ($randomWordCounter = 1; $randomWordCounter -Le $numberOfRandomWords; $rando
 }
 
 AppendItem -sb $bufferSb -item ([System.Environment]::NewLine)
+
+If (-Not [string]::IsNullOrWhiteSpace($filePathPrefix)) {
+	[string]$fileNamePrefix = Split-Path -Path $filePathPrefix -Leaf
+}
 
 # Generate and add lines
 For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
@@ -157,6 +142,10 @@ For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 		# Add delimiter before creating the next random word
 		AppendItem -sb $bufferSb -delimiter $itemDelimiter
 		[string]$wordBlock = "row $($lineNumber) - word 1KB - number $($currentWord) of $($numberOfRandomWords) - - - "
+		If (-Not [string]::IsNullOrWhiteSpace($fileNamePrefix)) {
+			$wordBlock = "prefix $($fileNamePrefix) - $($wordBlock)"
+		}
+
 		[UInt64]$currentWordLength = 0
 		While ($currentWordLength -Lt $randomWordLength) {
 			[int]$letterLimit = [Math]::Min($randomWordLength - $currentWordLength, $wordBlock.Length)
@@ -169,11 +158,23 @@ For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 		}
 	}
 
-	AppendItem -filePath $filePath -fileWriteThreshold $fileWriteThreshold -sb $bufferSb -item ([System.Environment]::NewLine)
+	AppendItem -sb $bufferSb -item ([System.Environment]::NewLine)
 }
 
 # Force file write (as the threshold is 0) at the end,
 # w/ the remaining string builder value, w/o appending any more items
 AppendItem -filePath $filePath -fileWriteThreshold 0 -sb $bufferSb
 
-LogSuccess "Result file @ [$((Resolve-Path -Path $filePath).Path)]"
+& "$($PSScriptRoot)\check_alternating_lines.ps1" `
+	-directory $directory `
+	-expectedLobLength $randomWordLength `
+	-expectedLobCount $numberOfRandomWords `
+	-expectedLineCount $numberOfLines `
+	-filePathPrefix $filePathPrefix `
+	-fileExtension $fileExtension
+[bool]$areFileContentsValid = $?
+If ($areFileContentsValid) {
+	LogSuccess "Result file @ [$($filePath)]"
+} Else {
+	ScriptFailure "Result file has invalid contents @ [$($filePath)]"
+}

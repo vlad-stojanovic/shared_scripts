@@ -1,20 +1,26 @@
 Param(
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Project to search LKGC (last-known-good-changeset) for")]
 	[ValidateSet("DS_MAIN", "DS_MAIN_DEV", "DS_MAIN_DEV_GIT")]
-	[string]$project = "DS_MAIN_DEV",
+	[string]$project = "DS_MAIN_DEV_GIT",
 
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Number of past hours (to look back) in the validation report")]
 	[ValidateScript({ $_ -Ge 12 })]
 	[UInt16]$lookbackHours = 24,
 
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Target build ID to be used (if successful) - value in the (usually leftmost) column named [ID] in the validation report)")]
 	[string]$targetBuildId = $Null,
 
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Perform the sync to the LGKC (i.e. the commit ID discovered, if available)")]
 	[switch]$sync,
 
-	[Parameter(Mandatory=$False)]
-	[switch]$ignoreCache)
+	[Parameter(Mandatory=$False, HelpMessage="Ignore recent cached contents (by default reused for an hour) of the validation report")]
+	[switch]$ignoreCache,
+
+	[Parameter(Mandatory=$False, HelpMessage="Print all rows/entries containing build information in the validation report")]
+	[switch]$printAllBuildInfo,
+
+	[Parameter(Mandatory=$False, HelpMessage="Show debug logs (internal to this script)")]
+	[switch]$showDebugLogs)
 
 # Include common helper functions
 . "$($PSScriptRoot)/common/_common.ps1"
@@ -53,7 +59,7 @@ function getBuildStatusTable() {
 
 	[string]$baseUri = "https://troubleshooter.redmond.corp.microsoft.com/CVReport.aspx"
 
-	[string]$targetUri = "$($baseUri)?LastHours=$($lookbackHours)&PassRate=0&Branch=$($project)&Title=$($project)&Key=14"
+	[string]$targetUri = "$($baseUri)?LastHours=$($lookbackHours)&PassRate=0&Branch=$($project)&Title=$($project)&Key=14&Dim=0"
 
 	LogInfo "[$($project)] Downloading DS CI status from [$($targetUri)]"
 	$html = (Invoke-WebRequest -Uri $targetUri).Content
@@ -86,22 +92,23 @@ function getGitCommitHash() {
 	}
 }
 
-function isRowValid() {
-	Param(
-		[Parameter(Mandatory=$True)]
-		[ValidateNotNullOrEmpty()]
-		[System.Xml.XmlElement]$row,
-
-		[Parameter(Mandatory=$True)]
-		[ValidateScript({ $ValidProjects.Contains($_) })]
-		[string]$project)
-
-	return ($Null -Ne $row.td -And
-		$row.td.Count -Ge 12 -And
-		(-Not [string]::IsNullOrWhiteSpace((getRowStatus -row $row -project $project))))
+[int[]]$global:StatusColumns = switch ($project) {
+	"DS_MAIN" { @(10, 13, 14); break }
+	"DS_MAIN_DEV" { @(10, 13, 14); break }
+	"DS_MAIN_DEV_GIT" { @(9, 10, 11, 12, 13, 14); break }
+	DEFAULT { ScriptFailure "Invalid project $($project)"; break }
 }
+[string]$global:StatusDelimiter = " / "
+[string]$global:ValidRowStatus = ($global:StatusColumns | ForEach-Object { "Passed" }) -join $global:StatusDelimiter
 
-[string]$ValidRowStatus = "Passed / Passed / Passed"
+function getRowDebugInfo() {
+	Param(
+		[ValidateNotNullOrEmpty()]
+		[System.Xml.XmlElement]$row)
+	[string[]]$tdValues = $row.td |
+		ForEach-Object { If ($_ -is [string]) { $_ } Else { $_.InnerText } }
+	return "[$($tdValues -join ', ')]"
+}
 
 function getRowStatus() {
 	Param(
@@ -112,14 +119,37 @@ function getRowStatus() {
 		[Parameter(Mandatory=$True)]
 		[ValidateScript({ $ValidProjects.Contains($_) })]
 		[string]$project)
-	
-	[string[]]$statuses = @($row.td[9].InnerText, $row.td[10].InnerText, $row.td[11].InnerText)
+	[string[]]$statuses = $global:StatusColumns | ForEach-Object { $row.td[$_].InnerText }
 	ForEach ($status in $statuses) {
 		If ([string]::IsNullOrWhiteSpace($status)) {
 			return $Null
 		}
 	}
 	return $statuses -join " / "
+}
+
+function isRowValid() {
+	Param(
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[System.Xml.XmlElement]$row,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateScript({ $ValidProjects.Contains($_) })]
+		[string]$project)
+
+	[bool]$isRowValid = ($Null -Ne $row.td -And
+		$row.td.Count -Gt [System.Linq.Enumerable]::Max($global:StatusColumns) -And
+		(-Not [string]::IsNullOrWhiteSpace((getRowStatus -row $row -project $project))))
+	If ($showDebugLogs.IsPresent) {
+		[string]$rowDebugInfo = getRowDebugInfo -row $row
+		If ($isRowValid) {
+			LogSuccess "Row valid: $($rowDebugInfo)"
+		} Else {
+			LogError "Row invalid: $($rowDebugInfo)"
+		}
+	}
+	return $isRowValid
 }
 
 function isRowForASuccessfulBuild() {
@@ -131,8 +161,17 @@ function isRowForASuccessfulBuild() {
 		[Parameter(Mandatory=$True)]
 		[ValidateScript({ $ValidProjects.Contains($_) })]
 		[string]$project)
-
-	return (getRowStatus -row $row -project $project) -Eq $ValidRowStatus;
+	[string]$rowStatus = getRowStatus -row $row -project $project
+	[bool]$isSuccessfulBuild = $rowStatus -Eq $global:ValidRowStatus
+	If ($showDebugLogs.IsPresent) {
+		[string]$rowDebugInfo = "$(getRowDebugInfo -row $row)`n`tBuild status: $($rowStatus)"
+		If ($isSuccessfulBuild) {
+			LogSuccess "Row build successful: $($rowDebugInfo)"
+		} Else {
+			LogError "Row build is not successful: $($rowDebugInfo)"
+		}
+	}
+	return $isSuccessfulBuild
 }
 
 function printRow() {
@@ -155,7 +194,7 @@ function printRow() {
 	[string]$time = $tds[5]
 	[string]$alias = $tds[6]
 	[string]$status = getRowStatus -row $row -project $project
-	[string]$latency = $tds[12]
+	[string]$latency = $tds[[System.Linq.Enumerable]::Max($global:StatusColumns) + 1]
 
 	[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)`n`tStatus: $($status)`n`tCommit hash [$($commitHash)]"
 	If (isRowForASuccessfulBuild -row $row -project $project) {
@@ -192,11 +231,13 @@ If (-Not [string]::IsNullOrWhiteSpace($targetBuildId)) {
 # Matching rows variable is no longer required, we are only interested in the first matching row
 Remove-Variable -Name "matchingRows"
 
-# Print all the build status rows up to (and including) the first matching one
+# Print all the build status rows
+# - up to (and including) the first matching one
+# - or all of them, if the appropriate flag is set
 For ($rowIndex = 0; $rowIndex -Lt $allValidRows.Count; $rowIndex++) {
 	$row = $allValidRows[$rowIndex]
 	printRow -row $row -prefix "#$($rowIndex)/$($allValidRows.Count)" -project $project
-	If ($row -Eq $matchingRow) {
+	If ((-Not $printAllBuildInfo.IsPresent) -And ($row -Eq $matchingRow)) {
 		break;
 	}
 }

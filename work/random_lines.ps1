@@ -70,7 +70,7 @@ function AppendItem() {
 		[Parameter(Mandatory=$False)]
 		[switch]$forceFileWrite)
 
-	If ($sb.Length -Gt 0 -And (-Not [string]::IsNullOrEmpty($delimiter))) {
+	If (-Not [string]::IsNullOrEmpty($delimiter)) {
 		[void]$sb.Append($delimiter)
 	}
 
@@ -103,13 +103,14 @@ If (Test-Path -Path $filePath) {
 
 [int]$fileWriteThreshold = $global:MB
 [int]$estimatedLineLength = $global:KB + $numberOfRandomWords * $randomWordLength
-[int]$sbCapacity = [Math]::Min($estimatedLineLength * $numberOfLines, $fileWriteThreshold * 2)
-[System.Text.StringBuilder]$bufferSb = [System.Text.StringBuilder]::new($sbCapacity)
+[System.Text.StringBuilder]$bufferSb = [System.Text.StringBuilder]::new($fileWriteThreshold * 2)
 
 [int]$logLineCadence = 1
 # Ensure at most 100 logs
-While ($estimatedLineLength -Lt $fileWriteThreshold -And $logLineCadence * 100 -Lt $numberOfLines) {
-	$logLineCadence *= 10
+If ($estimatedLineLength -Lt [UInt64]$fileWriteThreshold) {
+	While ($logLineCadence * 100 -Lt $numberOfLines) {
+		$logLineCadence *= 10
+	}
 }
 
 # Add header line
@@ -157,7 +158,7 @@ For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 		}
 	}
 
-	AppendItem -filePath $filePath -fileWriteThreshold $fileWriteThreshold -sb $bufferSb -item ([System.Environment]::NewLine)
+	AppendItem -sb $bufferSb -item ([System.Environment]::NewLine)
 }
 
 # Force file write (as the threshold is 0) at the end,

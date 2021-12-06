@@ -1,8 +1,8 @@
 Param(
-	[Parameter(Mandatory=$True)]
+	[Parameter(Mandatory=$True, HelpMessage="Directories to delete, absolute or relative paths")]
 	[string[]]$dirsToDelete,
 
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Common root directory for all the relative paths provided")]
 	[string]$rootDir)
 
 # Include common helper functions
