@@ -1,5 +1,5 @@
 Param(
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, "Rebased branch name, in full or short format. If not provided the current branch name will be used as base (and slightly modified).")]
 	[string]$rebasedBranchName = $Null)
 
 # Include git helper functions
@@ -7,13 +7,14 @@ Param(
 
 If ([string]::IsNullOrWhiteSpace($rebasedBranchName)) {
 	$gitCurrentBranch = GetCurrentBranchName
-	LogSuccess "Current Git branch [$($gitCurrentBranch)]"
+	Log Success "Current Git branch [$($gitCurrentBranch)]"
 	$rebasedBranchName="$($gitCurrentBranch)-rebased"
 } Else {
 	$rebasedBranchName = GetBranchFullName -branchName $rebasedBranchName
 }
 
-If (ConfirmAction "Rebase to new branch [$($rebasedBranchName)] and push from it") {
-	RunGitCommandSafely "git checkout -b $($rebasedBranchName)"
-	RunGitCommandSafely "git push -u origin $($rebasedBranchName)"
+If (-Not (RunCommand "git checkout -b $($rebasedBranchName)" -confirm)) {
+	return
 }
+
+PushBranchToOrigin -fullBranchName $rebasedBranchName

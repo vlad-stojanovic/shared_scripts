@@ -59,7 +59,7 @@ function AppendItem() {
 	If (-Not [string]::IsNullOrEmpty($filePath)) {
 		If ($sb.Length -Ge $fileWriteThreshold -Or $forceFileWrite.IsPresent) {
 			$global:FileWriteCount++
-			LogInfo "Write #$($global:FileWriteCount) of $(GetSizeString -size $sb.Length -unit 'B') characters to file [$($filePath)]"
+			Log Verbose "Write #$($global:FileWriteCount) of $(GetSizeString -size $sb.Length -unit 'B') characters to file [$($filePath)]"
 			Add-Content -Path $filePath -Value $sb.ToString() -NoNewline -Encoding Ascii
 			# Reset the string builder buffer
 			$sb.Length = 0
@@ -75,17 +75,19 @@ If ($numberOfLines % 2 -Ne 0) {
 	ScriptFailure "Number of lines must be even"
 }
 
-[string]$randomWordSizeString = GetSizeString -size $randomWordLength -unit 'B'
-[string]$filePath = Join-Path -Path $directory -ChildPath "$($filePathPrefix)lob-$($randomWordSizeString)_columns-$($numberOfRandomWords)_lines-$(GetSizeString -size $numberOfLines).$($fileExtension)"
+[UInt16]$decimalPoints = 3
+[string]$numberLogFormat = "N0"
+
+[string]$randomWordSizeString = GetSizeString -size $randomWordLength -unit 'B' -decimalPoints $decimalPoints
+[string]$linesString = GetSizeString -size $numberOfLines -unit '' -decimalPoints $decimalPoints
+[string]$fileName = "$($filePathPrefix)lob-$($randomWordSizeString)_columns-$($numberOfRandomWords)_lines-$($linesString)"
+[string]$filePath = Join-Path -Path $directory -ChildPath "$($fileName).$($fileExtension)"
 
 If (Test-Path -Path $filePath -PathType Leaf) {
 	ScriptFailure "File already exists @ [$($filePath)]"
 }
 
-[string]$fileDirectory = Split-Path $filePath -Parent
-If (-Not (Test-Path -Path $fileDirectory -PathType Container)) {
-	New-Item -Path $fileDirectory -ItemType Directory
-}
+CreateFileIfNotExists $filePath
 
 [int]$kiloByte = 1000
 [int]$fileWriteThreshold = $kiloByte * $kiloByte
@@ -116,16 +118,16 @@ If (-Not [string]::IsNullOrWhiteSpace($filePathPrefix)) {
 # Generate and add lines
 For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 	If ((($lineNumber - 1) % $logLineCadence) -Eq 0) {
-		[string]$logLineInfo = "Generating line #$($lineNumber)/$($numberOfLines)"
+		[string]$logLineInfo = "Generating line #$($lineNumber.ToString($numberLogFormat))/$($numberOfLines.ToString($numberLogFormat))"
 		If ($logLineCadence -Gt 1) {
-			$logLineInfo = "$($logLineInfo) (cadence $($logLineCadence))"
+			$logLineInfo = "$($logLineInfo) (cadence $($logLineCadence.ToString($numberLogFormat)))"
 		}
 		If ($numberOfRandomWords -Gt 0 -And $randomWordLength -Gt 0) {
 			$logLineInfo = "$($logLineInfo) with $($numberOfRandomWords) random word(s) of length $($randomWordSizeString)"
 		} Else {
 			$logLineInfo = "$($logLineInfo) without any random words"
 		}
-		LogInfo $logLineInfo
+		Log Info $logLineInfo
 	}
 
 	# Add ID as the first item, w/o delimiter
@@ -174,7 +176,7 @@ AppendItem -filePath $filePath -fileWriteThreshold 0 -sb $bufferSb
 	-fileExtension $fileExtension
 [bool]$areFileContentsValid = $?
 If ($areFileContentsValid) {
-	LogSuccess "Result file @ [$($filePath)]"
+	ScriptSuccess "Result file @ [$($filePath)]"
 } Else {
 	ScriptFailure "Result file has invalid contents @ [$($filePath)]"
 }

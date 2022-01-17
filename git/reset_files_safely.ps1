@@ -12,18 +12,20 @@ $defaultBranchName = GetDefaultBranchName
 
 [string[]]$diffFiles = git diff origin/$defaultBranchName --name-only
 If ($diffFiles.Count -Eq 0) {
-	ScriptExit -exitStatus 0 -message "No diff files found on branch [$($gitInitialBranch)]"
+	ScriptSuccess "No diff files found on branch [$($gitInitialBranch)]"
 }
 
-LogWarning "Found $($diffFiles.Count) diff files on branch [$($gitInitialBranch)]`n"
+Log Warning "Found $($diffFiles.Count) diff files on branch [$($gitInitialBranch)]"
+LogNewLine
 
 $count=0
 ForEach ($diffFile in $diffFiles) {
 	$count++
-	LogInfo "`nFile #$($count)/$($diffFiles.Count) @ [$($diffFile)]"
+	LogNewLine
+	Log Info "File #$($count)/$($diffFiles.Count) @ [$($diffFile)]"
 	If (-Not [string]::IsNullOrWhiteSpace($entitySubPath)) {
 		If ($diffFile -inotmatch "(^|[\/])$($entitySubPath)($|[\/])") {
-			LogInfo "`tnot matching path pattern [$entitySubPath]"
+			Log Verbose "not matching path pattern [$entitySubPath]" -indentLevel 1
 			continue	
 		}
 	}
@@ -31,8 +33,8 @@ ForEach ($diffFile in $diffFiles) {
 	$fileName = Split-Path -Path $diffFile -Leaf
 	If (ConfirmAction "Reset file #$($count)/$($diffFiles.Count) [$($fileName)])") {
 		RunGitCommandSafely "(git checkout origin/$($defaultBranchName) -- `"$($diffFile)`") -Or (git rm `"$($diffFile)`")"
-		LogSuccess "`tReset file [$($fileName)]"
+		Log Success "Reset file [$($fileName)]" -indentLevel 1
 	} Else {
-		LogInfo "\tSkipping reset of file [$($fileName)]"
+		Log Verbose "Skipping reset of file [$($fileName)]" -indentLevel 1
 	}
 }

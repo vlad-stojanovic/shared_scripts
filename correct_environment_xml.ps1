@@ -72,13 +72,12 @@ ForEach ($serverConnectionInfo in $allServerConnectionInfos) {
 	$serverConnectionInfo.SubscriptionId = $subscriptionId
 	$serverConnectionInfo.UserName = $username
 	$serverConnectionInfo.Password = $password
-	LogSuccess (@(
-		"Updated for $($serviceDebugInfo)",
+	Log Success "Updated for $($serviceDebugInfo)" -additionalEntries @(
 		"subscription ID: '$($subscriptionId)'",
 		"user name: '$($username)'",
-		"password: '$($password)'") -join "`n`t- ")
+		"password: '$($password)'") -entryPrefix "- "
 }
 
 LogNewLine
 $environmentXml.Save($environmentFilePath)
-LogSuccess "Updated environment file [$($environmentFilePath)]"
+Log Success "Updated environment file [$($environmentFilePath)]"

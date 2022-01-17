@@ -22,46 +22,43 @@ ForEach ($dir in $dirsToDelete) {
 	}
 
 	If (Test-Path -Path $targetDir -PathType Container){
-		LogWarning "Deleting entries from [$($targetDir)] directory"
+		Log Warning "Deleting entries from [$($targetDir)] directory"
+
 		$job = Start-Job -ScriptBlock {
-				Param([string]$targetDir)
-				Remove-Item -Path $targetDir -Recurse -Force -ErrorAction SilentlyContinue
-			} -ArgumentList $targetDir -Name "Removal of [$($targetDir)] directory"
-		$jobMap.Add($dir, $job.Id)
+				Param([string]$targetDir, [string]$deleteScriptPath)
+				& $deleteScriptPath -dirsToDelete @($targetDir)
+			} -ArgumentList @($targetDir, "$($PSScriptRoot)\delete_objects_sync.ps1") -Name "Removal of [$targetDir] directory"
+		$jobMap.Add($targetDir, $job.Id)
 	} Else {
-		LogInfo "Folder does not exist [$($targetDir)]"
+		Log Verbose "Folder does not exist [$($targetDir)]"
 	}
 }
 
 If ($jobMap.Count -Eq 0) {
 	LogNewLine
-	ScriptExit -exitStatus 0 -message "No deletion jobs started"
+	ScriptSuccess "No deletion jobs started"
 }
 
 Do {
 	LogNewLine
-	LogInfo "Checking status of $($jobMap.Count) remaining deletion job(s) in $($waitTimeS) seconds"
+	Log Info "Checking status of $($jobMap.Count) remaining deletion job(s) in $($waitTimeS) seconds (elapsed time $(GetStopWatchDuration -stopWatch $stopWatch))"
 	Start-Sleep -Seconds $waitTimeS
 
 	[string[]]$dirs = $jobMap.Keys
 	ForEach ($dir in $dirs) {
 		$job = Get-Job -Id $jobMap[$dir]
 		If ("Completed" -Eq $job.State) {
-			LogSuccess "Done with [$($dir)] after $($stopWatch.Elapsed.ToString('hh\:mm\:ss'))"
-			$jobResult = Receive-Job -Job $job -AutoRemoveJob -Wait
-			If (-Not [string]::IsNullOrWhiteSpace($jobResult)) {
-				LogInfo "Results:`n$($jobResult)"
-			}
+			Log Success "Done with [$($dir)] after $(GetStopWatchDuration -stopWatch $stopWatch)" -indentLevel 1
+
 			# Clean any remaining jobs with the same name
 			# that might be previously started but not removed.
 			Remove-Job -Name $job.Name -ErrorAction SilentlyContinue
 			$jobMap.Remove($dir)
 		} Else {
-			LogInfo "Deletion of [$($dir)] is in state: $($job.State)"
+			Log Verbose "Deletion of [$($dir)] is in state: $($job.State), for job '$($job.Name)'" -indentLevel 1
 		}
 	}
 } While ($jobMap.Count -Gt 0)
 
-$stopWatch.Stop()
 LogNewLine
-LogSuccess "Deletion finished in $($stopWatch.Elapsed.ToString('hh\:mm\:ss'))"
+Log Success "Deletion finished in $(GetStopWatchDuration -stopWatch $stopWatch -stop)"

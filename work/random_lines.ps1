@@ -1,7 +1,7 @@
 [CmdletBinding()]
 Param(
 	[Parameter(Mandatory=$False, HelpMessage="Output file path prefix")]
-	[string]$filePathPrefix = "temp",
+	[string]$filePathPrefix = "temp_",
 
 	[Parameter(Mandatory=$False, HelpMessage="Output file extension e.g. 'csv'")]
 	[string]$fileExtension = "csv",
@@ -26,29 +26,6 @@ Param(
 
 # Include common helper functions
 . "$($PSScriptRoot)/../common/_common.ps1"
-
-function GetSizeString() {
-	Param(
-		[Parameter(Mandatory=$True)]
-		[int]$size,
-
-		[Parameter(Mandatory=$False)]
-		[string]$unit = "")
-
-	[int]$sizeFactor = 1
-	[string]$unitPrefix = ""
-	If ($size -Ge $global:GB) {
-		$sizeFactor = $global:GB
-		$unitPrefix = "G"
-	} ElseIf ($size -Ge $global:MB) {
-		$sizeFactor = $global:MB
-		$unitPrefix = "M"
-	} ElseIf ($size -Ge $global:KB) {
-		$sizeFactor = $global:KB
-		$unitPrefix = "K"
-	}
-	return "$([int][Math]::Floor($size / $sizeFactor))$($unitPrefix)$($unit)"
-}
 
 function AppendItem() {
 	Param(
@@ -81,7 +58,7 @@ function AppendItem() {
 	If (-Not [string]::IsNullOrEmpty($filePath)) {
 		If ($sb.Length -Ge $fileWriteThreshold -Or $forceFileWrite.IsPresent) {
 			$global:FileWriteCount++
-			LogInfo "Write #$($global:FileWriteCount) of $(GetSizeString -size $sb.Length -unit 'B') characters to file [$($filePath)]"
+			Log Verbose "Write #$($global:FileWriteCount) of $(GetSizeString -size $sb.Length -unit 'B') characters to file [$($filePath)]"
 			Add-Content -Path $filePath -Value $sb.ToString() -NoNewline -Encoding Ascii
 			# Reset the string builder buffer
 			$sb.Length = 0
@@ -93,13 +70,19 @@ function AppendItem() {
 	'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
 	'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z')
 [char[]]$alphaNumLetters = $alphaLetters + @('1', '2', '3', '4', '5', '6', '7', '8', '9', '0')
-[string]$randomWordSizeString = GetSizeString -size $randomWordLength -unit 'B'
-[string]$filePath = "$($filePathPrefix)_$($randomWordSizeString)x$($numberOfRandomWords)-words_$(GetSizeString -size $numberOfLines -unit '')-lines.$($fileExtension)"
+[string]$numberLogFormat = "N0"
+[UInt16]$decimalPoints = 3
+
+[string]$randomWordSizeString = GetSizeString -size $randomWordLength -unit 'B' -decimalPoints $decimalPoints
+[string]$linesString = GetSizeString -size $numberOfLines -unit '' -decimalPoints $decimalPoints
+[string]$filePath = "$($filePathPrefix)lob-$($randomWordSizeString)_columns-$($numberOfRandomWords)_lines-$($linesString).$($fileExtension)"
 
 If (Test-Path -Path $filePath) {
-	LogInfo "Removing existing file [$($filePath)]"
+	Log Info "Removing existing file [$($filePath)]"
 	Remove-Item -Path $filePath
 }
+
+CreateFileIfNotExists $filePath
 
 [int]$fileWriteThreshold = $global:MB
 [int]$estimatedLineLength = $global:KB + $numberOfRandomWords * $randomWordLength
@@ -125,16 +108,16 @@ AppendItem -sb $bufferSb -item ([System.Environment]::NewLine)
 # Generate and add lines
 For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 	If ((($lineNumber - 1) % $logLineCadence) -Eq 0) {
-		[string]$logLineInfo = "Generating line #$($lineNumber)/$($numberOfLines)"
+		[string]$logLineInfo = "Generating line #$($lineNumber.ToString($numberLogFormat))/$($numberOfLines.ToString($numberLogFormat))"
 		If ($logLineCadence -Gt 1) {
-			$logLineInfo = "$($logLineInfo) (cadence $($logLineCadence))"
+			$logLineInfo = "$($logLineInfo) (cadence $($logLineCadence.ToString($numberLogFormat)))"
 		}
 		If ($numberOfRandomWords -Gt 0 -And $randomWordLength -Gt 0) {
 			$logLineInfo = "$($logLineInfo) with $($numberOfRandomWords) random word(s) of length $($randomWordSizeString)"
 		} Else {
 			$logLineInfo = "$($logLineInfo) without any random words"
 		}
-		LogInfo $logLineInfo
+		Log Info $logLineInfo
 	}
 
 	# Add ID as the first item, w/o delimiter
@@ -165,4 +148,4 @@ For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 # w/ the remaining string builder value, w/o appending any more items
 AppendItem -filePath $filePath -fileWriteThreshold 0 -sb $bufferSb
 
-LogSuccess "Result file @ [$((Resolve-Path -Path $filePath).Path)]"
+Log Success "Result file @ [$((Resolve-Path -Path $filePath).Path)]"

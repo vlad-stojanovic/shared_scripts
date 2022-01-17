@@ -39,20 +39,20 @@ function getBuildStatusTable() {
 		[UInt16]$lookbackHours)
 
 	$cacheValidityInMinutes = 60;
-	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "build_status_table_cache_$($project)_$($lookbackHours)h.txt"
+	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "cache/build_status_table_cache_$($project)_$($lookbackHours)h.txt"
 	If (Test-Path -Path $cacheFilePath) {
 		$creationTime = (Get-Item -Path $cacheFilePath).CreationTime
 		$cacheFileContent = Get-Content -Path $cacheFilePath
 		If ($creationTime -Gt (Get-Date).AddMinutes(-$cacheValidityInMinutes) -And
 			(-Not [string]::IsNullOrWhitespace($cacheFileContent))) {
 			If (-Not $ignoreCache.IsPresent) {
-				LogInfo "[$($project)] Using contents from [$($cacheFilePath)] created @ [$($creationTime)]"
+				Log Info "[$($project)] Using contents from [$($cacheFilePath)] created @ [$($creationTime)]"
 				return $cacheFileContent
 			} Else {
-				LogWarning "[$($project)] Ignoring valid cache @ [$($cacheFilePath)]"
+				Log Warning "[$($project)] Ignoring valid cache @ [$($cacheFilePath)]"
 			}
 		} Else {
-			LogWarning "[$($project)] Removing stale/empty cache @ [$($cacheFilePath)]"
+			Log Warning "[$($project)] Removing stale/empty cache @ [$($cacheFilePath)]"
 			Remove-Item -Path $cacheFilePath
 		}
 	}
@@ -61,15 +61,16 @@ function getBuildStatusTable() {
 
 	[string]$targetUri = "$($baseUri)?LastHours=$($lookbackHours)&PassRate=0&Branch=$($project)&Title=$($project)&Key=14&Dim=0"
 
-	LogInfo "[$($project)] Downloading DS CI status from [$($targetUri)]"
+	Log Verbose "[$($project)] Downloading DS CI status from [$($targetUri)]"
 	$html = (Invoke-WebRequest -Uri $targetUri).Content
 
-	LogInfo "[$($project)] Removing all new lines and link (<a>) tags to avoid XML parsing errors"
+	Log Verbose "[$($project)] Removing all new lines and link (<a>) tags to avoid XML parsing errors"
 	$htmlMin = $html -replace "(\r?\n)|(</?a[^>]*>)", ""
 
 	$tableMatch = Select-String -InputObject $htmlMin -Pattern "<table[^>]*>.*</table>"
 	$buildStatusTable = $tableMatch.Matches[0].Groups[0].Value
-	LogInfo "[$($project)] Caching values @ [$($cacheFilePath)] reusable for $($cacheValidityInMinutes) minutes"
+	Log Info "[$($project)] Caching values @ [$($cacheFilePath)] reusable for $($cacheValidityInMinutes) minutes"
+	CreateFileIfNotExists -filePath $cacheFilePath
 	$buildStatusTable | Out-File -FilePath $cacheFilePath
 	return $buildStatusTable
 }
@@ -102,6 +103,7 @@ function getGitCommitHash() {
 [string]$global:ValidRowStatus = ($global:StatusColumns | ForEach-Object { "Passed" }) -join $global:StatusDelimiter
 
 function getRowDebugInfo() {
+	[OutputType([string])]
 	Param(
 		[ValidateNotNullOrEmpty()]
 		[System.Xml.XmlElement]$row)
@@ -111,6 +113,7 @@ function getRowDebugInfo() {
 }
 
 function getRowStatus() {
+	[OutputType([string])]
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
@@ -129,6 +132,7 @@ function getRowStatus() {
 }
 
 function isRowValid() {
+	[OutputType([bool])]
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
@@ -144,15 +148,17 @@ function isRowValid() {
 	If ($showDebugLogs.IsPresent) {
 		[string]$rowDebugInfo = getRowDebugInfo -row $row
 		If ($isRowValid) {
-			LogSuccess "Row valid: $($rowDebugInfo)"
+			Log Success "Row valid: $($rowDebugInfo)"
 		} Else {
-			LogError "Row invalid: $($rowDebugInfo)"
+			Log Error "Row invalid: $($rowDebugInfo)"
 		}
 	}
+
 	return $isRowValid
 }
 
 function isRowForASuccessfulBuild() {
+	[OutputType([bool])]
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
@@ -164,17 +170,19 @@ function isRowForASuccessfulBuild() {
 	[string]$rowStatus = getRowStatus -row $row -project $project
 	[bool]$isSuccessfulBuild = $rowStatus -Eq $global:ValidRowStatus
 	If ($showDebugLogs.IsPresent) {
-		[string]$rowDebugInfo = "$(getRowDebugInfo -row $row)`n`tBuild status: $($rowStatus)"
+		[string[]]$additionalEntries = @((getRowDebugInfo -row $row), "status: $($rowStatus)")
 		If ($isSuccessfulBuild) {
-			LogSuccess "Row build successful: $($rowDebugInfo)"
+			Log Success "Row build successful:" -additionalEntries $additionalEntries
 		} Else {
-			LogError "Row build is not successful: $($rowDebugInfo)"
+			Log Error "Row build is not successful:" -additionalEntries $additionalEntries
 		}
 	}
+
 	return $isSuccessfulBuild
 }
 
 function printRow() {
+	[OutputType([System.Void])]
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
@@ -196,11 +204,12 @@ function printRow() {
 	[string]$status = getRowStatus -row $row -project $project
 	[string]$latency = $tds[[System.Linq.Enumerable]::Max($global:StatusColumns) + 1]
 
-	[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)`n`tStatus: $($status)`n`tCommit hash [$($commitHash)]"
+	[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)"
+	[string[]]$additionalEntries = @("Status: $($status)", "Commit hash [$($commitHash)]")
 	If (isRowForASuccessfulBuild -row $row -project $project) {
-		LogSuccess $message
+		Log Success $message -additionalEntries $additionalEntries
 	} Else {
-		LogWarning $message
+		Log Warning $message -additionalEntries $additionalEntries
 	}
 }
 
@@ -222,10 +231,10 @@ If (-Not [string]::IsNullOrWhiteSpace($targetBuildId)) {
 	If ($Null -Eq $matchingRow) {
 		ScriptFailure "Did not find a successful [$($project)] build with ID #$($targetBuildId)"
 	} Else {
-		LogSuccess "Found a target build #$($targetBuildId), out of $($matchingRows.Count)/$($allValidRows.Count) successful [$($project)] builds`n"
+		Log Success "Found a target build #$($targetBuildId), out of $($matchingRows.Count)/$($allValidRows.Count) successful [$($project)] builds`n"
 	}
 } Else {
-	LogSuccess "Found $($matchingRows.Count)/$($allValidRows.Count) successful [$($project)] builds, taking first one`n"
+	Log Success "Found $($matchingRows.Count)/$($allValidRows.Count) successful [$($project)] builds, taking first one`n"
 }
 
 # Matching rows variable is no longer required, we are only interested in the first matching row
@@ -249,7 +258,7 @@ If ([string]::IsNullOrWhiteSpace($commitHash)) {
 }
 
 If ($sync.IsPresent) {
-	LogWarning "Syncing to $($commitHash)... Please restart the CoreXT console manually afterwards`n"
+	Log Warning "Syncing to $($commitHash)... Please restart the CoreXT console manually afterwards`n"
 	& "$($PSScriptRoot)\git\merge_branch.ps1" -commit $commitHash
 
 	If (ConfirmAction "Delete build folders (for a clean new build)") {

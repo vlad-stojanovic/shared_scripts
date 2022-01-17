@@ -24,9 +24,13 @@ Param(
 # Include common helper functions
 . "$($PSScriptRoot)/../common/_common.ps1"
 
-[string]$expectedLobLengthStr = GetSizeString -size $expectedLobLength -unit "B"
+[UInt16]$decimalPoints = 3
+[string]$numberLogFormat = "N0"
 
-[string]$fileName = "$($filePathPrefix)lob-$($expectedLobLengthStr)_columns-$($expectedLobCount)_lines-$(GetSizeString -size $expectedLineCount)"
+[string]$expectedLobLengthStr = GetSizeString -size $expectedLobLength -unit "B" -decimalPoints $decimalPoints
+[string]$expectedLinesString = GetSizeString -size $expectedLineCount -unit '' -decimalPoints $decimalPoints
+
+[string]$fileName = "$($filePathPrefix)lob-$($expectedLobLengthStr)_columns-$($expectedLobCount)_lines-$($expectedLinesString)"
 [string]$filePath = "$($directory)\$($fileName).$($fileExtension)"
 If (-Not (Test-Path -Path $filePath -PathType Leaf)) {
 	ScriptFailure "File does not exist @ [$($filePath)]"
@@ -40,7 +44,7 @@ while(!$reader.EndOfStream) {
 	$lineCounter++
 	[string]$rowValue = $reader.ReadLine() # -replace "^\d+,[0-9Nan]+,",""
 	[string[]]$columnLengths = $rowValue -split "," | ForEach-Object { $_.Length }
-	LogInfo "Row #$($lineCounter) (length $($rowValue.Length)) has $($columnLengths.Length) columns"
+	Log Info "Row #$($lineCounter.ToString($numberLogFormat)) (length $(GetSizeString -size $rowValue.Length -unit 'B' -decimalPoints $decimalPoints)) has $($columnLengths.Length.ToString($numberLogFormat)) columns"
 
 	[HashTable]$lengthMap = @{}
 	For ([int]$ci = 0; $ci -Lt $columnLengths.Length; $ci++) {
@@ -56,7 +60,7 @@ while(!$reader.EndOfStream) {
 	[bool]$foundExpectedLobSize = $False
 	ForEach ($key in ($lengthMap.Keys | Sort-Object)) {
 		[int]$value = $lengthMap[$key]
-		[string]$message = "$(GetSizeString -size ([UInt32]$key) -unit 'B') x $($value), "
+		[string]$message = "$(GetSizeString -size ([UInt32]$key) -unit 'B' -decimalPoints $decimalPoints) x $($value.ToString($numberLogFormat)), "
 		If ($key -Eq $expectedLobLength.ToString()) {
 			$foundExpectedLobSize = $True
 			If ($value -Eq $expectedLobCount) {
@@ -73,12 +77,12 @@ while(!$reader.EndOfStream) {
 	LogNewLine
 	If (-Not $foundExpectedLobSize) {
 		$invalidLineFound = $True
-		LogError "Did not find expected LOB size $($expectedLobLengthStr)"
+		Log Error "Did not find expected LOB size $($expectedLobLengthStr)"
 	}
 
 	If ($invalidLineFound) {
 		[string]$errorFilePath = "$($directory)\$($fileName)_invalid-row-$($lineCounter).txt"
-		LogInfo "Logging row contents @ [$($errorFilePath)]"
+		Log Info "Logging row contents @ [$($errorFilePath)]"
 		$rowValue | Out-File -FilePath $errorFilePath -Encoding Ascii
 		break # Don't read anymore - the file contents are incorrect
 	}
@@ -90,4 +94,4 @@ If ($invalidLineFound -Or $lineCounter -Ne $expectedLineCount) {
 	ScriptFailure "Did not find expected number of lines $($expectedLineCount)"
 }
 
-ScriptExit -exitStatus 0 -message "File [$($filePath)] contents are as expected"
+ScriptSuccess "File [$($filePath)] contents are as expected"

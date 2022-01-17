@@ -14,7 +14,7 @@ function removeModules() {
 		[string]$moduleNames)
 
 	Remove-Module -Name $moduleName -ErrorAction SilentlyContinue
-	LogWarning "`tAttempting to uninstall module: $($moduleName)"
+	Log Warning "Attempting to uninstall module: $($moduleName)" -indentLevel 1
 	Uninstall-Module -Name $moduleName -AllVersions
 }
 
@@ -30,7 +30,7 @@ If ($modules.Count -Eq 0) {
 	$modulesMsg = "$($modules.Count) target modules"
 }
 
-LogInfo "Searching for dependencies of $($modulesMsg)"
+Log Info "Searching for dependencies of $($modulesMsg)"
 [string[]]$dependencyModuleNames = $modules |
 	ForEach-Object {
 		[string]$moduleInfoPath = Join-Path -Path $_.InstalledLocation -ChildPath PSGetModuleInfo.xml
@@ -43,11 +43,11 @@ $dependencyModuleNames
 exit
 
 If ($dependencyModuleNames.Count -Gt 0) {
-	LogWarning "Removing $($dependencyModuleNames.Count) dependency modules of $($modulesMsg)"
+	Log Warning "Removing $($dependencyModuleNames.Count) dependency modules of $($modulesMsg)"
 	$dependencyModuleNames | ForEach-Object { removeModule -moduleName $_ }
 } Else {
-	LogInfo "No dependencies found for $($modulesMsg)"
+	Log Verbose "No dependencies found for $($modulesMsg)"
 }
 
-LogWarning "Removing $($modulesMsg)"
+Log Warning "Removing $($modulesMsg)"
 $modules | ForEach-Object { removeModule -moduleName $_.Name }

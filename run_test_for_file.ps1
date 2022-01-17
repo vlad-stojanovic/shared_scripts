@@ -3,7 +3,7 @@ Param(
 	[ValidateNotNullOrEmpty()]
 	[string]$startDir,
 
-	[Parameter(Mandatory=$True, HelpMessage="File absolute path, file relative path (to `$startDir), or file name")]
+	[Parameter(Mandatory=$True, HelpMessage="Absolute path, relative path (to `$startDir), or name, of a source/project (not a header) test file")]
 	[ValidateNotNullOrEmpty()]
 	[string]$filePath,
 
@@ -28,7 +28,7 @@ Param(
 # Include common helper functions
 . "$($PSScriptRoot)/common/_common.ps1"
 # Include find-project function
-. "$($PSScriptRoot)/work/find_project_for_file.ps1"
+. "$($PSScriptRoot)/work/find_file_common_safe.ps1"
 
 function find_first_match() {
 	[OutputType([string])]
@@ -53,19 +53,26 @@ function find_first_match() {
 	return $matches[0]
 }
 
-$filePath = find_absolute_path_in_start_dir -startDir $startDir -filePath $filePath
+[string]$fileAbsPath = find_absolute_path_in_start_dir -startDir $startDir -filePath $filePath 
+If ([string]::IsNullOrWhiteSpace($fileAbsPath)) {
+	ScriptFailure "No test file found"
+}
 
-[string]$projectPath = find_project_for_file_in_start_dir -startDir $startDir -filePath $filePath
+[string]$projectPath = find_project_for_file_in_start_dir -startDir $startDir -filePath $fileAbsPath
+If ([string]::IsNullOrWhiteSpace($projectPath)) {
+	ScriptFailure "No test project found"
+}
+
 [string]$assemblyName = find_first_match -filePath $projectPath -pattern "<AssemblyName>\s*([^\s]+)\s*</AssemblyName>"
 # Assembly name might not be provided with an extension in the project file
 If (-Not ($assemblyName.EndsWith(".dll") -Or $assemblyName.EndsWith(".exe"))) {
 	$assemblyName = "$($assemblyName).dll"
 }
 
-LogInfo "Found assembly [$($assemblyName)] in project [$($projectPath)]"
+Log Verbose "Found assembly [$($assemblyName)] in project [$($projectPath)]"
 
-[string]$namespace = find_first_match -filePath $filePath -pattern "^\s*namespace\s+([^\s]+)"
-LogInfo "Found namespace [$($assemblyName)] in file [$($filePath)]"
+[string]$namespace = find_first_match -filePath $fileAbsPath -pattern "^\s*namespace\s+([^\s]+)"
+Log Verbose "Found namespace [$($namespace)] in file [$($fileAbsPath)]"
 
 If ($classNames.Length -Gt 0) {
 	$classNames = $classNames |
@@ -79,42 +86,48 @@ If ($classNames.Length -Gt 0) {
 			}
 		}
 } Else {
-	$classNames = Select-String -Path $filePath -Pattern "^\s*public(.*)class\s+([^\s]+)" |
+	$classNames = Select-String -Path $fileAbsPath -Pattern "^\s*((public)|(internal))(.*)class\s+([^\s]+)" |
 		Select-Object -ExpandProperty Matches |
-		Where-Object { -Not ($_.Groups[1].Value -imatch "abstract") } |
-		ForEach-Object { $_.Groups[2].Value } |
+		Where-Object { -Not ($_.Groups[4].Value -imatch "abstract") } |
+		ForEach-Object { $_.Groups[5].Value } |
 		Where-Object { -Not [string]::IsNullOrWhiteSpace($_) } |
 		ForEach-Object { "$($namespace).$($_)" }
 	If ($classNames.Length -Gt 0) {
-		LogInfo "Found $($classNames.Length) class(es) in test file [$($filePath)]"
+		Log Verbose "Found $($classNames.Length) class(es) in test file [$($fileAbsPath)]"
 	} Else {
-		ScriptFailure "Found no classes in test file [$($filePath)]"
+		ScriptFailure "Found no classes in test file [$($fileAbsPath)]"
 	}
 }
 
 LogNewLine
-[System.Diagnostics.StopWatch]$stopWatch = [System.Diagnostics.StopWatch]::StartNew()
+[System.Diagnostics.StopWatch]$totalStopWatch = [System.Diagnostics.StopWatch]::StartNew()
+[string]$totalDurationStr = $Null
 For ([Uint16]$ci = 0; $ci -Lt $classNames.Length; $ci++) {
-	[string]$className = $classNames[$ci]
-	[string]$classNumberInfo = "$($ci + 1)/$($classNames.Length)"
-	[string]$testCommand = "$($suitesPath) /assembly $($assemblyName) /className $($className) /envFile `"$($environmentXmlFilePath)`" $($includeOption)"
-	LogInfo "Test class #$($classNumberInfo) command:`n`t$($testCommand)`n"
+	[string]$fullClassName = $classNames[$ci]
+	# Remove namespace from the class, use only its short name for logging
+	[string]$classNameShort = $fullClassName -replace "^.*\.",""
+	[string]$classInfo = "Test class '$($classNameShort)' #$($ci + 1)/$($classNames.Length)"
+	[string]$testCommand = "$($suitesPath) /assembly $($assemblyName) /className $($fullClassName) /envFile `"$($environmentXmlFilePath)`" $($includeOption)"
+	Log Info "$($classInfo) command:" -additionalEntries @("$($testCommand)`n")
 	If (-Not $dryRun.IsPresent) {
 		If ($ci -Gt 0) {
 			[UInt16]$sleepInS = 60
-			LogInfo "Sleeping for $($sleepInS)s before starting next test class in order to process previous results"
+			Log Verbose "Sleeping for $($sleepInS)s before starting next test class in order to process previous results"
 			Start-Sleep -Seconds $sleepInS
 		}
 
+		[System.Diagnostics.StopWatch]$currentTestStopWatch = [System.Diagnostics.StopWatch]::StartNew()
 		# Do not use RunCommand as it will hide all the test logs
 		Invoke-Expression -Command $testCommand
-		# Do not stop the stopwatch, continue measuring time until all test classes are executed
-		LogInfo "Executed $($classNumberInfo) test class(es) in $(GetStopWatchDuration -stopWatch $stopWatch)"
+		[string]$currentTestDurationStr = GetStopWatchDuration -stopWatch $currentTestStopWatch -stop
+		# Do not stop the global stopwatch, continue measuring time until all test classes are executed
+		$totalDurationStr = GetStopWatchDuration -stopWatch $totalStopWatch
+		Log Success "$($classInfo) executed in $($currentTestDurationStr) (total duration $($totalDurationStr))"
 	}
 }
 
-[string]$durationStr = GetStopWatchDuration -stopWatch $stopWatch -stop
+$totalDurationStr = GetStopWatchDuration -stopWatch $totalStopWatch -stop
 If (-Not $dryRun.IsPresent) {
 	LogNewLine
-	LogSuccess "Executed $($classNames.Length) classes in test file [$($filePath)] in $($durationStr)"
+	Log Success "Executed $($classNames.Length) class(es) in test file [$($fileAbsPath)] in $($totalDurationStr)"
 }

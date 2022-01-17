@@ -392,7 +392,7 @@ Add-Type -ReferencedAssemblies @() -TypeDefinition $csSource -Language CSharp
 [System.Diagnostics.Process[]]$processes = Get-Process -Name $processName | `
 	Where-Object { $_.MainWindowTitle.Contains($windowTitleInfix) }
 If ($processes.Count -Gt 1) {
-	LogWarning "Found $($processes.Count) matching processes"
+	Log Warning "Found $($processes.Count) matching processes"
 } ElseIf ($processes.Count -Eq 0) {
 	ScriptFailure "Did not find any matching processes [$($processName)]. Add correct filters for process name and window title"
 }
@@ -402,7 +402,7 @@ ForEach ($process in $processes) {
 	[string]$processInfo = "#$($process.Id) [$($processName)] window handle [$($process.MainWindowHandle)] title [$($process.MainWindowTitle)]"
 	[long]$buildConfigurationWindowHandle = [VStojanovic.UICommands.PSWrapper]::FindBuildConfigurationWindow($process);
 	If ($buildConfigurationWindowHandle -Eq 0) {
-		LogWarning "Could not find Build Configuration window open within`n`t$($processInfo)"
+		Log Warning "Could not find Build Configuration window open within" -additionalEntries @($processInfo)
 		continue
 	}
 
@@ -411,10 +411,10 @@ ForEach ($process in $processes) {
 
 	$result = [VStojanovic.UICommands.PSWrapper]::SendBuildConfigurationInputs($buildConfigurationWindowHandle, $keyIterations);
 	If ($result) {
-		LogSuccess "Sent $($keyIterations) key commands to`n`t$($processInfo) -> #$($buildConfigurationWindowHandle)"
+		Log Success "Sent $($keyIterations) key commands to" -additionalEntries @("$($processInfo) -> #$($buildConfigurationWindowHandle)")
 		$buildConfigurationsProcessed++
 	} Else {
-		LogError "Failed to send key commands to`n`t$($processInfo) -> #$($buildConfigurationWindowHandle)"
+		Log Error "Failed to send key commands to" -additionalEntries @("$($processInfo) -> #$($buildConfigurationWindowHandle)")
 	}
 }
 
@@ -422,4 +422,4 @@ If ($buildConfigurationsProcessed -Eq 0) {
 	ScriptFailure "No build configuration windows processed in $($processes.Count) [$($processName)] process(es)"
 }
 
-LogWarning "Check manually that the build configuration is now correct (e.g. a single current project is being built)"
+Log Warning "Check manually that the build configuration is now correct (e.g. a single current project is being built)"

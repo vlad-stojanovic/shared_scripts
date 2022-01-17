@@ -40,13 +40,13 @@ If ($gitInitialBranch -Eq $mergeSourceBranchName) {
 		# If a target commit is provided then check both short and full current code versions.
 		[string]$currentCodeVersionShort = GetCodeVersion -fullBranchName $mergeSourceBranchName -short
 		If ($currentCodeVersionFull -IEq $commit -Or $currentCodeVersionShort -IEq $commit) {
-			ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on code version $($commit)"
+			ScriptSuccess "Branch [$($mergeSourceBranchName)] is already on code version $($commit)"
 		}
 	} Else {
 		# If no commit is provided then check the latest version.
 		[string]$remoteCodeVersionFull = GetCodeVersion -fullBranchName $mergeSourceBranchName -remote
 		If ($currentCodeVersionFull -IEq $remoteCodeVersionFull) {
-			ScriptExit -exitStatus 0 -message "Branch [$($mergeSourceBranchName)] is already on the latest code version $($currentCodeVersionFull)"
+			ScriptSuccess "Branch [$($mergeSourceBranchName)] is already on the latest code version $($currentCodeVersionFull)"
 		}
 	}
 }
@@ -70,7 +70,7 @@ If (DoesBranchExist -fullBranchName $pullBranchName -origin remote) {
 	}
 } Else {
 	# Branch does not exist on the remote origin - we cannot perform git pull
-	LogWarning "git pull not possible for local branch [$($pullBranchName)]"
+	Log Warning "git pull not possible for local branch [$($pullBranchName)]"
 }
 
 # If we weren't initially on merge source branch then switch back and merge
@@ -88,4 +88,4 @@ If ($gitFilesChanged -Gt 0) {
 	RunGitCommandSafely -gitCommand "git stash pop" -changedFileCount $gitFilesChanged
 }
 
-LogSuccess "Successfully updated branch [$($gitInitialBranch)] from [$($mergeSourceBranchName)]"
+Log Success "Successfully updated branch [$($gitInitialBranch)] ($(GetCodeVersion -fullBranchName $gitInitialBranch -short)) from [$($mergeSourceBranchName)]"

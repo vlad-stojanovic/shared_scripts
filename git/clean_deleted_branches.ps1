@@ -17,18 +17,18 @@ If ($currentBranchesDeleted.Count -Gt 0) {
 	# Switch to default branch to enable deletion of the current branch
 	# which is deleted from the remote origin
 	[string]$defaultBranchName = GetDefaultBranchName
-	LogWarning "Switching away from current branch [$($currentBranchesDeleted[0])] which is deleted from the remote origin"
-	LogWarning "NOTE: The default branch [$defaultBranchName] will not be automatically updated!`nIf needed - merge/pull manually afterwards"
+	Log Warning "Switching away from current branch [$($currentBranchesDeleted[0])] which is deleted from the remote origin"
+	Log Warning "NOTE: The default branch [$defaultBranchName] will not be automatically updated!`nIf needed - merge/pull manually afterwards"
 	Invoke-Expression "$($PSScriptRoot)\switch_to_clean_branch.ps1 -branchName $($defaultBranchName) -skipRemoteBranchInfoUpdate -skipPullOnNewBranch"
 }
 
 [string[]]$allDeletedBranches = git branch --verbose | Where-Object { $_ -imatch $deletedBranchRegex } | ForEach-Object { $_.Trim().Split()[0] }
 If ($allDeletedBranches.Count -Gt 0) {
-	LogWarning "Cleaning $($allDeletedBranches.Count) deleted remote branche(s)"
+	Log Warning "Cleaning $($allDeletedBranches.Count) deleted remote branche(s)"
 	# Clean the remotely deleted branches, force to avoid asking for confirmation
 	ForEach ($deletedBranch in $allDeletedBranches) {
 		git branch -df $deletedBranch
 	}
 } Else {
-	LogSuccess "No deleted remote branches to clean locally"
+	Log Success "No deleted remote branches to clean locally"
 }
