@@ -45,6 +45,7 @@ while(!$reader.EndOfStream) {
 	[string]$rowValue = $reader.ReadLine() # -replace "^\d+,[0-9Nan]+,",""
 	[string[]]$columnLengths = $rowValue -split "," | ForEach-Object { $_.Length }
 	Log Info "Row #$($lineCounter.ToString($numberLogFormat)) (length $(GetSizeString -size $rowValue.Length -unit 'B' -decimalPoints $decimalPoints)) has $($columnLengths.Length.ToString($numberLogFormat)) columns"
+	Log Verbose "Starting chars: $($rowValue.Substring(0, 60))" -indentLevel 1
 
 	[HashTable]$lengthMap = @{}
 	For ([int]$ci = 0; $ci -Lt $columnLengths.Length; $ci++) {

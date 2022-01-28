@@ -86,14 +86,16 @@ If ($classNames.Length -Gt 0) {
 			}
 		}
 } Else {
-	$classNames = Select-String -Path $fileAbsPath -Pattern "^\s*((public)|(internal))(.*)class\s+([^\s]+)" |
+	[string[]]$classOnlyNames = Select-String -Path $fileAbsPath -Pattern "^\s*((public)|(internal))(.*)class\s+([^\s]+)" |
 		Select-Object -ExpandProperty Matches |
 		Where-Object { -Not ($_.Groups[4].Value -imatch "abstract") } |
 		ForEach-Object { $_.Groups[5].Value } |
-		Where-Object { -Not [string]::IsNullOrWhiteSpace($_) } |
+		Where-Object { -Not [string]::IsNullOrWhiteSpace($_) }
+	$classNames = $classOnlyNames |
 		ForEach-Object { "$($namespace).$($_)" }
 	If ($classNames.Length -Gt 0) {
-		Log Verbose "Found $($classNames.Length) class(es) in test file [$($fileAbsPath)]"
+		Log Verbose "Found $($classNames.Length) class(es) in test file [$($fileAbsPath)]" `
+			-additionalEntries "@($(($classOnlyNames | ForEach-Object { "'$($_)'" }) -join ", "))"
 	} Else {
 		ScriptFailure "Found no classes in test file [$($fileAbsPath)]"
 	}

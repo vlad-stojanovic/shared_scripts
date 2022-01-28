@@ -122,6 +122,7 @@ For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 		If ($logLineCadence -Gt 1) {
 			$logLineInfo = "$($logLineInfo) (cadence $($logLineCadence.ToString($numberLogFormat)))"
 		}
+
 		If ($numberOfRandomWords -Gt 0 -And $randomWordLength -Gt 0) {
 			$logLineInfo = "$($logLineInfo) with $($numberOfRandomWords) random word(s) of length $($randomWordSizeString)"
 		} Else {
@@ -143,11 +144,7 @@ For ($lineNumber = 1; $lineNumber -Le $numberOfLines; $lineNumber++) {
 	For ($currentWord = 1; $currentWord -Le $numberOfRandomWords; $currentWord++) {
 		# Add delimiter before creating the next random word
 		AppendItem -sb $bufferSb -delimiter $itemDelimiter
-		[string]$wordBlock = "row $($lineNumber) - word 1KB - number $($currentWord) of $($numberOfRandomWords) - - - "
-		If (-Not [string]::IsNullOrWhiteSpace($fileNamePrefix)) {
-			$wordBlock = "prefix $($fileNamePrefix) - $($wordBlock)"
-		}
-
+		[string]$wordBlock = "row $($lineNumber) - word $(GetSizeString -size $randomWordLength -unit 'B') - number $($currentWord) of $($numberOfRandomWords) - - - "
 		[UInt64]$currentWordLength = 0
 		While ($currentWordLength -Lt $randomWordLength) {
 			[int]$letterLimit = [Math]::Min($randomWordLength - $currentWordLength, $wordBlock.Length)

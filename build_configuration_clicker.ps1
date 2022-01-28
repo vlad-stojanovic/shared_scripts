@@ -152,6 +152,7 @@ namespace VStojanovic.UICommands
 			VK_RIGHT = 0x27,
 			VK_DOWN = 0x28,
 			VK_SPACE = 0x20,
+			VK_TAB = 0x09,
 			VK_RETURN = 0x0D,
 			VK_LBUTTON = 0x01,
 			VK_RBUTTON = 0x02,

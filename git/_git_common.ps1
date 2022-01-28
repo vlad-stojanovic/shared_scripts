@@ -7,6 +7,19 @@
 # Include safe Git helper functions
 . "$($PSScriptRoot)/_git_common_safe.ps1"
 
+function LogGitStashMessageOnFailure() {
+	[OutputType([System.Void])]
+	Param(
+		[Parameter(Mandatory=$True, HelpMessage="Number of changed files that are stashed, and should be manually popped in case of command failure")]
+		[UInt16]$stashedFileCount)
+	[string]$stashCmd = "git stash pop"
+	If ($stashedFileCount -Gt 0) {
+		Log Warning "Remember to run '$($stashCmd)' to restore changes in $($stashedFileCount) files"
+	} Else {
+		Log Verbose "No files stashed - no restore needed via '$($stashCmd)'"
+	}
+}
+
 function RunGitCommandSafely() {
 	[OutputType([System.Void])]
 	Param(
@@ -15,13 +28,10 @@ function RunGitCommandSafely() {
 		[string]$gitCommand,
 
 		[Parameter(Mandatory=$False, HelpMessage="Number of changed files that are stashed, and should be manually popped in case of command failure")]
-		[Int]$changedFileCount = 0)
+		[UInt16]$changedFileCount = 0)
 	[bool]$execStatus = RunCommand $gitCommand -silentCommandExecution
 	If (-Not $execStatus) {
-		If ($changedFileCount -gt 0) {
-			Log Warning "Remember to run 'git stash pop' to restore $($changedFileCount) changed files"
-		}
-
+		LogGitStashMessageOnFailure -stashedFileCount $changedFileCount
 		ScriptFailure "Git command failed"
 	}
 }

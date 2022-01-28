@@ -76,7 +76,16 @@ If (DoesBranchExist -fullBranchName $pullBranchName -origin remote) {
 # If we weren't initially on merge source branch then switch back and merge
 If ($gitInitialBranch -Ne $mergeSourceBranchName) {
 	RunGitCommandSafely -gitCommand "git checkout $gitInitialBranch" -changedFileCount $gitFilesChanged
-	RunGitCommandSafely -gitCommand "git merge $mergeSourceBranchName" -changedFileCount $gitFilesChanged
+	if (-Not (RunCommand "git merge $mergeSourceBranchName" -silentCommandExecution)) {
+		Log Warning "Resolve all the merge conflicts manually and then continue the merge"
+		If (ConfirmAction "Did you resolve all the merge conflicts") {
+			RunGitCommandSafely "git merge --continue"
+		} Else {
+			LogGitStashMessageOnFailure -stashedFileCount $gitFilesChanged
+			ScriptFailure "Merge failed"
+		}
+	}
+
 	If ($rebase.IsPresent -And (ConfirmAction "Rebase to $($mergeSourceBranchName) and reset/squash other committed changes visible in the PR")) {
 		RunGitCommandSafely -gitCommand "git rebase origin/$($mergeSourceBranchName)" -changedFileCount $gitFilesChanged
 		RunGitCommandSafely -gitCommand "git push --force" -changedFileCount $gitFilesChanged
