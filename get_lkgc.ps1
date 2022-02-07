@@ -148,9 +148,9 @@ function isRowValid() {
 	If ($showDebugLogs.IsPresent) {
 		[string]$rowDebugInfo = getRowDebugInfo -row $row
 		If ($isRowValid) {
-			Log Success "Row valid: $($rowDebugInfo)"
+			Log Success "Row valid: $($rowDebugInfo)" -noPersist
 		} Else {
-			Log Error "Row invalid: $($rowDebugInfo)"
+			Log Error "Row invalid: $($rowDebugInfo)" -noPersist
 		}
 	}
 
@@ -172,9 +172,9 @@ function isRowForASuccessfulBuild() {
 	If ($showDebugLogs.IsPresent) {
 		[string[]]$additionalEntries = @((getRowDebugInfo -row $row), "status: $($rowStatus)")
 		If ($isSuccessfulBuild) {
-			Log Success "Row build successful:" -additionalEntries $additionalEntries
+			Log Success "Row build successful:" -additionalEntries $additionalEntries -noPersist
 		} Else {
-			Log Error "Row build is not successful:" -additionalEntries $additionalEntries
+			Log Error "Row build is not successful:" -additionalEntries $additionalEntries -noPersist
 		}
 	}
 
@@ -199,17 +199,40 @@ function printRow() {
 	$tds = $row.td;
 	[string]$id = $tds[0]
 	[string]$commitHash = getGitCommitHash -row $row -project $project
+	[string]$descendantId = $tds[3]
+	[string]$descendantType = $tds[4]
 	[string]$time = $tds[5]
 	[string]$alias = $tds[6]
 	[string]$status = getRowStatus -row $row -project $project
 	[string]$latency = $tds[[System.Linq.Enumerable]::Max($global:StatusColumns) + 1]
 
+	[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
+	[bool]$useLogDelimiter = ($alias -IEq $env:USERNAME)
+	If ($useLogDelimiter) {
+		LogNewLine
+		Log Info $logDelimiter
+	}
+
 	[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)"
-	[string[]]$additionalEntries = @("Status: $($status)", "Commit hash [$($commitHash)]")
+	[string]$descendantInfo = "-"
+	If (-Not [string]::IsNullOrWhiteSpace($descendantId)) {
+		$descendantInfo = "#$($descendantId)"
+	}
+
+	If (-Not [string]::IsNullOrWhiteSpace($descendantType)) {
+		$descendantInfo	= "$($descendantInfo) (type $($descendantType))"
+	}
+
+	[string[]]$additionalEntries = @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
 	If (isRowForASuccessfulBuild -row $row -project $project) {
 		Log Success $message -additionalEntries $additionalEntries
 	} Else {
 		Log Warning $message -additionalEntries $additionalEntries
+	}
+
+	If ($useLogDelimiter) {
+		Log Info $logDelimiter
+		LogNewLine
 	}
 }
 
