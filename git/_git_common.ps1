@@ -29,11 +29,34 @@ function RunGitCommandSafely() {
 
 		[Parameter(Mandatory=$False, HelpMessage="Number of changed files that are stashed, and should be manually popped in case of command failure")]
 		[UInt16]$changedFileCount = 0)
+	# Return on command success.
+	# Perform additional processing only on command failure.
 	[bool]$execStatus = RunCommand $gitCommand -silentCommandExecution
-	If (-Not $execStatus) {
-		LogGitStashMessageOnFailure -stashedFileCount $changedFileCount
-		ScriptFailure "Git command failed"
+	If ($execStatus) {
+		return
 	}
+
+	# Extract the Git operation used
+	[string]$operationLC = "command"
+	If ($gitCommand.ToLower() -imatch "^git\s+([\w-]+)\b") {
+		$operationLC = $Matches[1]
+
+		# Process operations that might fail, but can be continued/aborted after manual intervention
+		[string[]]$continuableOperationsLC = @("cherry-pick", "merge", "rebase", "revert")
+		If ($continuableOperationsLC -icontains $operationLC) {
+			Log Warning "Resolve all the $($operationLC) conflicts manually and then continue the $($operationLC) operation"
+			If (ConfirmAction "Did you resolve all the $($operationLC) conflicts") {
+				RunCommand "git $($operationLC) --continue" -silentCommandExecution | Out-Null
+				# Git operation recovered after the initial failure.
+				return
+			} ElseIf (ConfirmAction "Abort $($operationLC) operation" -defaultYes) {
+				RunCommand "git $($operationLC) --abort" -silentCommandExecution | Out-Null
+			}
+		}
+	}
+
+	LogGitStashMessageOnFailure -stashedFileCount $changedFileCount
+	ScriptFailure "Git $($operationLC) failed"
 }
 
 function UpdateBranchesInfoFromRemote() {
@@ -54,7 +77,7 @@ function UpdateBranchesInfoFromRemote() {
 function GetCurrentBranchName() {
 	[OutputType([string])]
 	Param()
-	[string]$currentBranchName = git rev-parse --abbrev-ref HEAD
+	[string]$currentBranchName = GetCurrentBranchNameNoValidation
 	If ([string]::IsNullOrWhiteSpace($currentBranchName)) {
 		ScriptFailure "Unable to get current Git branch name"
 	}

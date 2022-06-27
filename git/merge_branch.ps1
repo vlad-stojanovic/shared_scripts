@@ -1,21 +1,25 @@
 Param(
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Merge source branch name. If not present then it defaults to the default branch e.g. 'master' or 'main'")]
 	[string]$mergeSourceBranchName = $Null,
 
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Commit hash to sync the local repo to")]
 	[string]$commit = $Null,
 
-	[Parameter(Mandatory=$False)]
+	[Parameter(Mandatory=$False, HelpMessage="Whether we should attempt to rebase the current branch")]
 	[switch]$rebase,
 	
-	[Parameter(Mandatory=$False)]
-	[switch]$skipRemoteBranchInfoUpdate)
+	[Parameter(Mandatory=$False, HelpMessage="Whether we should skip update of remote branches i.e. 'git fetch'")]
+	[switch]$skipRemoteBranchInfoUpdate,
+	
+	[Parameter(Mandatory=$False, HelpMessage="Whether we should push the changes to remote origin after the merge completes successfully")]
+	[switch]$push)
 
 # Include git helper functions
 . "$($PSScriptRoot)/_git_common.ps1"
 
 # Get current git branch
 $gitInitialBranch = GetCurrentBranchName
+Log Verbose "Currently on branch [$($gitInitialBranch)]"
 
 If (-Not $skipRemoteBranchInfoUpdate.IsPresent) {
 	# Update list of branches from remote origin
@@ -75,16 +79,8 @@ If (DoesBranchExist -fullBranchName $pullBranchName -origin remote) {
 
 # If we weren't initially on merge source branch then switch back and merge
 If ($gitInitialBranch -Ne $mergeSourceBranchName) {
-	RunGitCommandSafely -gitCommand "git checkout $gitInitialBranch" -changedFileCount $gitFilesChanged
-	if (-Not (RunCommand "git merge $mergeSourceBranchName" -silentCommandExecution)) {
-		Log Warning "Resolve all the merge conflicts manually and then continue the merge"
-		If (ConfirmAction "Did you resolve all the merge conflicts") {
-			RunGitCommandSafely "git merge --continue"
-		} Else {
-			LogGitStashMessageOnFailure -stashedFileCount $gitFilesChanged
-			ScriptFailure "Merge failed"
-		}
-	}
+	RunGitCommandSafely -gitCommand "git checkout $($gitInitialBranch)" -changedFileCount $gitFilesChanged
+	RunGitCommandSafely -gitCommand "git merge $($mergeSourceBranchName)" -changedFileCount $gitFilesChanged
 
 	If ($rebase.IsPresent -And (ConfirmAction "Rebase to $($mergeSourceBranchName) and reset/squash other committed changes visible in the PR")) {
 		RunGitCommandSafely -gitCommand "git rebase origin/$($mergeSourceBranchName)" -changedFileCount $gitFilesChanged
@@ -98,3 +94,7 @@ If ($gitFilesChanged -Gt 0) {
 }
 
 Log Success "Successfully updated branch [$($gitInitialBranch)] ($(GetCodeVersion -fullBranchName $gitInitialBranch -short)) from [$($mergeSourceBranchName)]"
+
+If ($push.IsPresent) {
+	PushBranchToOrigin -fullBranchName $gitInitialBranch -confirm
+}

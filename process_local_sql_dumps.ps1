@@ -1,10 +1,13 @@
 Param(
 	[Parameter(Mandatory=$False)]
-	[string[]]$sqlDumpFolders = @("$($env:USERPROFILE)\AppData\Local\CrashDumps", "$($env:USERPROFILE)\AppData\Local\Temp", "$($env:ProgramData)\Microsoft\Windows\WER\ReportQueue"),
+	[string[]]$dumpFolders = @(
+		, "$($env:USERPROFILE)\AppData\Local\CrashDumps"
+		, "$($env:USERPROFILE)\AppData\Local\Temp"
+		, "$($env:ProgramData)\Microsoft\Windows\WER\ReportQueue"),
 
 	[Parameter(Mandatory=$False)]
 	[ValidateNotNullOrEmpty()]
-	[string]$sqlDumpFileFilter = "SQL*.dmp",
+	[string]$dumpFileFilter = "SQL*.*dmp",
 
 	[Parameter(Mandatory=$False)]
 	[UInt16]$searchDepth = 1,
@@ -14,22 +17,23 @@ Param(
 	[string]$dumpSortProperty = "time",
 
 	[Parameter(Mandatory=$False)]
-	[switch]$dryRun)
+	[ValidateSet("delete", "list", "open")]
+	[string]$action = "list")
 
 # Include common helper functions
 . "$($PSScriptRoot)/common/_common.ps1"
 
-# Search for SQL dumps
+# Search for dumps
 [HashTable]$resultMap = @{}
-For ([UInt16]$dfI = 0; $dfI -Lt $sqlDumpFolders.Length; $dfI++) {
-	[string]$sqlDumpFolderPath = Resolve-Path -Path $sqlDumpFolders[$dfI] -ErrorAction Ignore
-	If ([string]::IsNullOrWhiteSpace($sqlDumpFolderPath)) {
-		Log Error "Could not resolve path of #$($dfI+1)/$($sqlDumpFolders.Length) [$($sqlDumpFolders[$dfI])]"
+For ([UInt16]$dfI = 0; $dfI -Lt $dumpFolders.Length; $dfI++) {
+	[string]$dumpFolderPath = Resolve-Path -Path $dumpFolders[$dfI] -ErrorAction Ignore
+	If ([string]::IsNullOrWhiteSpace($dumpFolderPath)) {
+		Log Error "Could not resolve path of #$($dfI+1)/$($dumpFolders.Length) [$($dumpFolders[$dfI])]"
 		continue
 	}
 
 	[HashTable]$directoryMap = @{}
-	Get-ChildItem -Path $sqlDumpFolderPath -Recurse -Depth $searchDepth -filter $sqlDumpFileFilter -File | ForEach-Object {
+	Get-ChildItem -Path $dumpFolderPath -Recurse -Depth $searchDepth -filter $dumpFileFilter -File | ForEach-Object {
 		[string]$directoryPath = $_.Directory.FullName
 		[PSCustomObject]$dirObject = $directoryMap[$directoryPath]
 		If ($Null -Ne $dirObject) {
@@ -44,7 +48,7 @@ For ([UInt16]$dfI = 0; $dfI -Lt $sqlDumpFolders.Length; $dfI++) {
 		}
 	}
 
-	$resultMap[$sqlDumpFolderPath] = $directoryMap
+	$resultMap[$dumpFolderPath] = $directoryMap
 }
 
 [PSCustomObject[]]$resultObjects = $resultMap.Keys |
@@ -64,47 +68,53 @@ Remove-Variable -Name resultMap
 [string]$dateFormat = "yyyy-MM-dd HH:mm:ss"
 [Byte]$sizeDecimalPoints = 1
 
-[string]$actionVerb = $Null
-If ($dryRun.IsPresent) {
-	$actionVerb = "Found"
-} Else {
-	$actionVerb = "Removed"
+[string]$actionVerb = switch ($action) {
+	"delete" { "Removed" }
+	default { "Found" }
 }
 
 [UInt32]$totalDumpDirectoryCount = $resultObjects | ForEach-Object { $_.entries.Count } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
 If ($totalDumpDirectoryCount -Eq 0) {
-	ScriptSuccess "No dump files $($actionVerb.ToLower()) in $($sqlDumpFolders.Length) root folders (search depth $($searchDepth))"
+	ScriptSuccess "No dump files $($actionVerb.ToLower()) in $($dumpFolders.Length) root folders (search depth $($searchDepth))"
 }
 
 # Process all of the found dumps
+[PSCustomObject]$lastDumpEntry = $Null
 ForEach ($resultObject in $resultObjects) {
 	LogNewLine
-	[string]$sqlDumpFolderPath = $resultObject.path
+	[string]$dumpFolderPath = $resultObject.path
 	[PSCustomObject[]]$dirObjects = $resultObject.entries
 	If ($resultObject.count -Gt 0 -And $dirObjects.Count -Gt 0) {
 		[UInt32]$dirDumpCount = $resultObject.count
 		[UInt64]$dirDumpSize = $resultObject.size
 		[DateTime]$dirLastDumpTime = $resultObject.time
-		Log Info "Processing SQL dump folder [$($sqlDumpFolderPath)]"
+		Log Info "Processing dump folder [$($dumpFolderPath)]"
 		For ($doi = 0; $doi -Lt $dirObjects.Count; $doi++) {
+			$lastDumpEntry = $dirObjects[$doi]
 			[string]$directoryPath = $dirObjects[$doi].path
 			[UInt64]$dumpCount = $dirObjects[$doi].count
 			[UInt64]$dumpSize = $dirObjects[$doi].size
 			[DateTime]$dumpTime = $dirObjects[$doi].time
 
-			If (-Not $dryRun.IsPresent) {
+			If ($action -IEq "delete") {
 				# Ignore output from the command
 				& "$($PSScriptRoot)/work/delete_objects_sync.ps1" -dirsToDelete @($directoryPath) | Out-Null
 			}
 
-			Log Warning "$($actionVerb) folder #$($doi + 1)/$($dirObjects.Count) [$($directoryPath)]" -additionalEntries @("with $($dumpCount) SQL dump file(s) of size $(GetSizeString -size $dumpSize -unit 'B' -decimalPoints $sizeDecimalPoints)", "latest dump occurred @ $($dumpTime.ToString($dateFormat))")
+			Log Warning "$($actionVerb) folder #$($doi + 1)/$($dirObjects.Count) [$($directoryPath)]" -additionalEntries @("with $($dumpCount) dump file(s) of size $(GetSizeString -size $dumpSize -unit 'B' -decimalPoints $sizeDecimalPoints)", "latest dump occurred @ $($dumpTime.ToString($dateFormat))")
 		}
 
 		LogNewLine
-		Log Warning "$($actionVerb) $($dirDumpCount) dump(s) of size $(GetSizeString -size $dirDumpSize -unit 'B' -decimalPoints $sizeDecimalPoints) in [$($sqlDumpFolderPath)], latest @ $($dirLastDumpTime.ToString($dateFormat))"
+		Log Warning "$($actionVerb) $($dirDumpCount) dump(s) of size $(GetSizeString -size $dirDumpSize -unit 'B' -decimalPoints $sizeDecimalPoints) in [$($dumpFolderPath)], latest @ $($dirLastDumpTime.ToString($dateFormat))"
 	} Else {
-		Log Success "No dump files $($actionVerb.ToLower()) in [$($sqlDumpFolderPath)]"
+		Log Success "No dump files $($actionVerb.ToLower()) in [$($dumpFolderPath)]"
 	}
+}
+
+If ($action -IEq "open" -And $Null -Ne $lastDumpEntry) {
+	LogNewLine
+	Log Info "Opening last dump (sorted by $($dumpSortProperty)) directory @ [$($lastDumpEntry.path)]"
+	Invoke-Item -Path $lastDumpEntry.path
 }
 
 LogNewLine

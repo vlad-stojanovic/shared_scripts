@@ -32,7 +32,7 @@ ForEach ($parentProject in $parentProjects) {
 	[string]$parentProjectName = [System.IO.Path]::GetFileNameWithoutExtension($parentProjectPath)
 	If ($parentProjectPath -Ieq $projectPath) {
 		Log Info "Parent project [$($parentProjectName)] is @ [$($projectPath)]"
-	} ElseIf (Select-String -Path $parentProjectPath -Pattern $projectName -SimpleMatch -Quiet) {
+	} ElseIf (Select-String -Path $parentProjectPath -Pattern "\b$([System.Text.RegularExpressions.Regex]::Escape($projectName))\b" -Quiet) {
 		Log Info "Parent project [$($parentProjectName)] contains [$($projectName)]" -additionalEntries @("@ [$($parentProjectPath)]")
 	}
 }

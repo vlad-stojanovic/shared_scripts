@@ -20,7 +20,10 @@ Param (
 	[string]$nugetPackageBuildDropSubfolder,
 	
 	[Parameter(Mandatory=$False, HelpMessage="Modify the local Nuget package path by adding this suffix. Check whether the build supports the provided version suffix for Nuget packages")]
-	[string]$nugetPackageLocalVersionSuffix = $Null)
+	[string]$nugetPackageLocalVersionSuffix = $Null,
+
+	[Parameter(Mandatory=$False, HelpMessage="Clean the package cache folder, forcing its redownload")]
+	[switch]$cleanPackageCache)
 	
 # Include common helper functions
 . "$($PSScriptRoot)/../common/_common.ps1"
@@ -33,6 +36,16 @@ If (-Not (CheckEntryCount -entries $configPackages -description "$($packageFullN
 
 [string]$versionCache = $configPackages[0].version
 [string]$versionLocal = $versionCache
+[string]$packageLocalPath = Join-Path -Path $nugetCacheRootPath -ChildPath "$($packageFullName).$($versionLocal)"
+If ($cleanPackageCache) {
+	If (Test-Path -Path $packageLocalPath) {
+		Remove-Item -Recurse -Force -Path $packageLocalPath
+		ScriptSuccess "Cleaned package cache folder @ [$($packageLocalPath)]"
+	} Else {
+		ScriptSuccess "Package cache does not exist @ [$($packageLocalPath)]"
+	}	 
+}
+
 If ([string]::IsNullOrWhiteSpace($nugetPackageLocalVersionSuffix) -Or $versionLocal.EndsWith($nugetPackageLocalVersionSuffix)) {
 	Log Info "$($packageFullName) local version already correct [$($versionLocal)]"
 } Else {
@@ -42,7 +55,6 @@ If ([string]::IsNullOrWhiteSpace($nugetPackageLocalVersionSuffix) -Or $versionLo
 	$config.Save($projectPackageConfigPath)
 }
 
-[string]$packageLocalPath = Join-Path -Path $nugetCacheRootPath -ChildPath "$($packageFullName).$($versionLocal)"
 If (Test-Path -Path $packageLocalPath) {
 	Log Verbose "Package cache already exists" -additionalEntries @("@ [$($packageLocalPath)]")
 } Else {

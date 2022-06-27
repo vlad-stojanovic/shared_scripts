@@ -17,4 +17,5 @@ If (-Not (RunCommand "git checkout -b $($rebasedBranchName)" -confirm)) {
 	return
 }
 
-PushBranchToOrigin -fullBranchName $rebasedBranchName
+# The branch is newly created above, it does not exist remotely.
+PushBranchToOrigin -fullBranchName $rebasedBranchName -noRemoteBranch

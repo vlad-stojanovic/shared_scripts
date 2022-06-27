@@ -17,6 +17,12 @@ function GetDefaultBranchName() {
 	return $defaultBranchName
 }
 
+function GetCurrentBranchNameNoValidation() {
+	[OutputType([string])]
+	Param()	
+	return (git rev-parse --abbrev-ref HEAD)
+}
+
 function GetBranchFullName() {
 	[OutputType([string])]
 	Param(
@@ -34,10 +40,13 @@ function GetBranchFullName() {
 		return $gitUserName
 	}
 
-	# If the branch name is already in the correct format then simply return it
-	If ($branchName.StartsWith("dev/") -Or ($branchName -Eq $(GetDefaultBranchName))) {
+	# If the branch name is already in the correct format then simply return it e.g.
+	# - dev/ALIAS/BRANCH_NAME e.g. dev/vstojanovic/my-branch
+	# - rel/TRAIN_TYPE/TRAIN_NAME e.g. rel/st/ST10.2
+	# - DEFAULT_BRANCH_NAME e.g. master
+	If ($branchName.StartsWith("dev/") -Or $branchName.StartsWith("rel/") -Or ($branchName -Eq $(GetDefaultBranchName))) {
 		return $branchName
-	} 
+	}
 
 	# Prefix the branch name with the username before creating it,
 	# if it isn't already prefixed properly
@@ -71,6 +80,22 @@ function GetCodeVersion() {
 	}
 	$sbCommand.Append($fullBranchName) | Out-Null
 	[string]$codeVersion = Invoke-Expression -Command $sbCommand.ToString()
+	return $codeVersion
+}
+
+function GetCurrentCodeVersion() {	
+	[OutputType([string])]
+	Param(
+		[Parameter(Mandatory=$False)]
+		[switch]$short)
+	[string]$currentBranchName = GetCurrentBranchNameNoValidation
+	If ([string]::IsNullOrEmpty($currentBranchName)) {
+		Log Error "No current Git branch found"
+		return $Null
+	}
+
+	[string]$codeVersion = GetCodeVersion -fullBranchName $currentBranchName -short:$short.IsPresent
+	Log Info "Current branch [$($currentBranchName)] is on code version [$($codeVersion)]"
 	return $codeVersion
 }
 
@@ -114,9 +139,18 @@ function PushBranchToOrigin() {
 		[string]$fullBranchName,
 
 		[Parameter(Mandatory=$False, HelpMessage="Confirm push action before execution")]
-		[switch]$confirm)
+		[switch]$confirm,
+
+		[Parameter(Mandatory=$False, HelpMessage="Whether the branch does not exist remotely")]
+		[switch]$noRemoteBranch)
+	[string]$gitCmd = "git push"
+	If ($noRemoteBranch.IsPresent -Or (-Not (DoesBranchExist -fullBranchName $fullBranchName -origin "remote"))) {
+		# If the branch does not exist remotely then create it
+		$gitCmd = "$($gitCmd) -u origin $($fullBranchName)"
+	}
+
 	# Ignore return value for RunCommand
-	RunCommand "git push -u origin $($fullBranchName)" -confirm:$confirm.IsPresent | Out-Null
+	RunCommand $gitCmd -confirm:$confirm.IsPresent | Out-Null
 }
 
 function GetCurrentRepositoryUrl() {
@@ -163,6 +197,42 @@ function IsCommitByAuthor() {
 	
 	Log Success "$($commitDescription) commit information:`n$($commitInfo)"
 	return $True
+}
+
+function ConfigureCurrentUserFromEnv() {
+	[OutputType([System.Void])]
+	Param(
+		[Parameter(Mandatory=$False, HelpMessage="User name (display version e.g. 'John Smith')")]
+		[AllowNull()]
+		[string]$displayUserName = $Null)
+	function GitConfig() {
+		[OutputType([System.Void])]
+		Param(
+			[Parameter(Mandatory=$True, HelpMessage="Config name")]
+			[ValidateNotNullOrEmpty()]
+			[string]$config,
+	
+			[Parameter(Mandatory=$True, HelpMessage="Config value")]
+			[ValidateNotNullOrEmpty()]
+			[string]$value)
+		[string]$currentValue = git config $config
+		If ([string]::IsNullOrEmpty($currentValue)) {
+			Log Info "Setting git config '$($config)' to '$($currentValue)'"
+			git config $config $value
+		} ElseIf ($currentValue -IEq $value) {
+			Log Success "Git config '$($config)' already set to '$($currentValue)'"
+		} Else {
+			Log Warning "Git config '$($config)' already set to '$($currentValue)', skipping override to '$($value)'"
+		}
+	}
+
+	[string]$envUserName = [System.Environment]::UserName
+	If ([string]::IsNullOrEmpty($displayUserName)) {
+		$displayUserName = $envUserName
+	}
+
+	GitConfig -config "user.name" -value $displayUserName
+	GitConfig -config "user.email" -value "$($envUserName)@microsoft.com"
 }
 
 function IsCommitByCurrentUser() {

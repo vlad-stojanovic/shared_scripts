@@ -3,6 +3,9 @@ Param(
 	[ValidateSet("DS_MAIN", "DS_MAIN_DEV", "DS_MAIN_DEV_GIT")]
 	[string]$project = "DS_MAIN_DEV_GIT",
 
+	[Parameter(Mandatory=$False, HelpMessage="Relevant aliases whose builds should be highlighted")]
+	[string[]]$relevantAliases = @("AVAdmin", $env:USERNAME),
+
 	[Parameter(Mandatory=$False, HelpMessage="Number of past hours (to look back) in the validation report")]
 	[ValidateScript({ $_ -Ge 12 })]
 	[UInt16]$lookbackHours = 24,
@@ -157,8 +160,8 @@ function isRowValid() {
 	return $isRowValid
 }
 
-function isRowForASuccessfulBuild() {
-	[OutputType([bool])]
+function getLogTypeForRowBuild() {
+	[OutputType([string])]
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
@@ -168,17 +171,24 @@ function isRowForASuccessfulBuild() {
 		[ValidateScript({ $ValidProjects.Contains($_) })]
 		[string]$project)
 	[string]$rowStatus = getRowStatus -row $row -project $project
+	[string]$logType = "Warning"
 	[bool]$isSuccessfulBuild = $rowStatus -Eq $global:ValidRowStatus
+	If ($isSuccessfulBuild) {
+		$logType = "Success"
+	} ElseIf ($rowStatus.Contains("Failed")) {
+		$logType = "Error"
+	}
+
 	If ($showDebugLogs.IsPresent) {
 		[string[]]$additionalEntries = @((getRowDebugInfo -row $row), "status: $($rowStatus)")
 		If ($isSuccessfulBuild) {
 			Log Success "Row build successful:" -additionalEntries $additionalEntries -noPersist
 		} Else {
-			Log Error "Row build is not successful:" -additionalEntries $additionalEntries -noPersist
+			Log $logType "Row build is not successful:" -additionalEntries $additionalEntries -noPersist
 		}
 	}
 
-	return $isSuccessfulBuild
+	return $logType
 }
 
 function printRow() {
@@ -207,7 +217,7 @@ function printRow() {
 	[string]$latency = $tds[[System.Linq.Enumerable]::Max($global:StatusColumns) + 1]
 
 	[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
-	[bool]$useLogDelimiter = ($alias -IEq $env:USERNAME)
+	[bool]$useLogDelimiter = (-Not [string]::IsNullOrEmpty($alias)) -And ($relevantAliases -contains $alias)
 	If ($useLogDelimiter) {
 		LogNewLine
 		Log Info $logDelimiter
@@ -223,12 +233,8 @@ function printRow() {
 		$descendantInfo	= "$($descendantInfo) (type $($descendantType))"
 	}
 
-	[string[]]$additionalEntries = @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
-	If (isRowForASuccessfulBuild -row $row -project $project) {
-		Log Success $message -additionalEntries $additionalEntries
-	} Else {
-		Log Warning $message -additionalEntries $additionalEntries
-	}
+	[string]$logType = getLogTypeForRowBuild -row $row -project $project
+	Log $logType $message -additionalEntries @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
 
 	If ($useLogDelimiter) {
 		Log Info $logDelimiter
@@ -239,10 +245,8 @@ function printRow() {
 $buildStatusTable = getBuildStatusTable -project $project -lookbackHours $lookbackHours
 
 $parsedXml = [XML]$buildStatusTable
-[System.Xml.XmlElement[]]$allValidRows = $parsedXml.table.tr | `
-	Where-Object { isRowValid -row $_  -project $project }
-[System.Xml.XmlElement[]]$matchingRows = $allValidRows | `
-	Where-Object { isRowForASuccessfulBuild -row $_ -project $project }
+[System.Xml.XmlElement[]]$allValidRows = $parsedXml.table.tr | Where-Object { isRowValid -row $_  -project $project }
+[System.Xml.XmlElement[]]$matchingRows = $allValidRows | Where-Object { (getLogTypeForRowBuild -row $_ -project $project) -Eq "Success" }
 If ($Null -Eq $matchingRows -Or $matchingRows.Count -Eq 0) {
 	ScriptFailure "Did not find any successful builds, try increasing the lookback period or checking the URI manually (is the logic in this script wrong?)."
 }
