@@ -90,15 +90,23 @@ ForEach ($serverConnectionInfo in $allServerConnectionInfos) {
 		}
 	}
 
-	[System.Xml.XmlElement]$targetProvisionedServiceInfo = $targetProvisionedServiceInfos |
-		Where-Object { $_.Name -IEq $serverName } |
-		Select-Object -First 1
+	[System.Xml.XmlElement]$targetProvisionedServiceInfo = $Null
+	If (1 -Eq $targetProvisionedServiceInfos.Count) {
+		$targetProvisionedServiceInfo = $targetProvisionedServiceInfos[0]
+		Log Verbose "Taking the only provisioned $($serverType) type - [$($targetProvisionedServiceInfo.Name)]"
+	} Else {
+		$targetProvisionedServiceInfo = $targetProvisionedServiceInfos |
+			Where-Object { $_.Name -IEq $serverName } |
+			Select-Object -First 1
+	}
+
 	If ($Null -Eq $targetProvisionedServiceInfo) {
 		ScriptFailure "No info found for $($serviceDebugInfo) in [$($provisionedServicesPath)]"
 	}
 
 	Log Info "Processing $($serviceDebugInfo)"
 	UpdateXmlValue -element $serverConnectionInfo -propertyName SubscriptionId -newValue $targetProvisionedServiceInfo.SubscriptionId
+	UpdateXmlValue -element $serverConnectionInfo -propertyName Name -newValue $targetProvisionedServiceInfo.Name
 	UpdateXmlValue -element $serverConnectionInfo -propertyName UserName -newValue $targetProvisionedServiceInfo.Username
 	UpdateXmlValue -element $serverConnectionInfo -propertyName Password -newValue $targetProvisionedServiceInfo.Password
 }

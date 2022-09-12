@@ -56,21 +56,21 @@ If ($gitInitialBranch -Eq $mergeSourceBranchName) {
 }
 
 # Stash initial changes to enable pull/merge/checkout
-$gitFilesChanged = StashChangesAndGetChangedFileCount
+[Int]$gitFilesChanged = StashChangesAndGetChangedFileCount
 
 # If we aren't already on the merge source branch then switch
 $pullBranchName = $gitInitialBranch
 If ($gitInitialBranch -Ne $mergeSourceBranchName) {
-	RunGitCommandSafely -gitCommand "git checkout $($mergeSourceBranchName)" -changedFileCount $gitFilesChanged
+	RunGitCommand -gitCommand "checkout" -parameters @($mergeSourceBranchName) -changedFileCount $gitFilesChanged
 	$pullBranchName = $mergeSourceBranchName
 }
 
 If (DoesBranchExist -fullBranchName $pullBranchName -origin remote) {
 	If ([string]::IsNullOrWhiteSpace($commit)) {
 		# Update the branch (pull new changes)
-		RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged
+		RunGitCommand -gitCommand "pull" -parameters @("-q") -changedFileCount $gitFilesChanged
 	} Else {
-		RunGitCommandSafely -gitCommand "git reset --hard $($commit)"
+		RunGitCommand -gitCommand "reset" -parameters @("--hard $($commit)")
 	}
 } Else {
 	# Branch does not exist on the remote origin - we cannot perform git pull
@@ -79,19 +79,17 @@ If (DoesBranchExist -fullBranchName $pullBranchName -origin remote) {
 
 # If we weren't initially on merge source branch then switch back and merge
 If ($gitInitialBranch -Ne $mergeSourceBranchName) {
-	RunGitCommandSafely -gitCommand "git checkout $($gitInitialBranch)" -changedFileCount $gitFilesChanged
-	RunGitCommandSafely -gitCommand "git merge $($mergeSourceBranchName)" -changedFileCount $gitFilesChanged
+	RunGitCommand -gitCommand "checkout" -parameters @($gitInitialBranch) -changedFileCount $gitFilesChanged
+	RunGitCommand -gitCommand "merge" -parameters @($mergeSourceBranchName) -changedFileCount $gitFilesChanged
 
 	If ($rebase.IsPresent -And (ConfirmAction "Rebase to $($mergeSourceBranchName) and reset/squash other committed changes visible in the PR")) {
-		RunGitCommandSafely -gitCommand "git rebase origin/$($mergeSourceBranchName)" -changedFileCount $gitFilesChanged
-		RunGitCommandSafely -gitCommand "git push --force" -changedFileCount $gitFilesChanged
+		RunGitCommand -gitCommand "rebase" -parameters @("origin/$($mergeSourceBranchName)") -changedFileCount $gitFilesChanged
+		RunGitCommand -gitCommand "push" -parameters @("--force") -changedFileCount $gitFilesChanged
 	}
 }
 
 # Stash pop initial changes
-If ($gitFilesChanged -Gt 0) {
-	RunGitCommandSafely -gitCommand "git stash pop" -changedFileCount $gitFilesChanged
-}
+UnstashChanges -changedFileCount $gitFilesChanged
 
 Log Success "Successfully updated branch [$($gitInitialBranch)] ($(GetCodeVersion -fullBranchName $gitInitialBranch -short)) from [$($mergeSourceBranchName)]"
 

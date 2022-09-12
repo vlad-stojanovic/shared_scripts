@@ -1,7 +1,23 @@
 Param(
-	[Parameter(Mandatory=$False, HelpMessage="Project to search LKGC (last-known-good-changeset) for")]
-	[ValidateSet("DS_MAIN", "DS_MAIN_DEV", "DS_MAIN_DEV_GIT")]
-	[string]$project = "DS_MAIN_DEV_GIT",
+	[Parameter(Mandatory=$False, HelpMessage="Validation gate")]
+	[ValidateSet(
+		, "Auto-Functionals"
+		, "Auto-Functionals/CI"
+		, "Auto-Functionals/Functional"
+		, "Auto-Functionals/Functional/Engine"
+		, "Auto-Functionals/Functional/XDB"
+		, "Auto-Functionals/Functional/DW"
+		, "Cluster Validation"
+		, "CT Trident"
+		, "DW Gen3"
+	)]
+	[string]$validationGate = "Auto-Functionals/CI",
+
+	[Parameter(Mandatory=$False, HelpMessage="Validation key override, explicitly set (>= 0) will override `$validationGate")]
+	[Int16]$validationKeyOverride = -1,
+
+	[Parameter(Mandatory=$False, HelpMessage="Validation dimension override, explicitly set (>= 0) will override `$validationGate")]
+	[Int16]$validationDimensionOverride = 0,
 
 	[Parameter(Mandatory=$False, HelpMessage="Relevant aliases whose builds should be highlighted")]
 	[string[]]$relevantAliases = @("AVAdmin", $env:USERNAME),
@@ -9,6 +25,10 @@ Param(
 	[Parameter(Mandatory=$False, HelpMessage="Number of past hours (to look back) in the validation report")]
 	[ValidateScript({ $_ -Ge 12 })]
 	[UInt16]$lookbackHours = 24,
+
+	[Parameter(Mandatory=$False, HelpMessage="Project to search LKGC (last-known-good-changeset) for")]
+	[ValidateNotNullOrEmpty()]
+	[string]$projectBranch = "DS_MAIN_DEV_GIT",
 
 	[Parameter(Mandatory=$False, HelpMessage="Target build ID to be used (if successful) - value in the (usually leftmost) column named [ID] in the validation report)")]
 	[string]$targetBuildId = $Null,
@@ -30,49 +50,105 @@ Param(
 
 $ErrorActionPreference = "Stop"
 
-[string[]]$ValidProjects = @("DS_MAIN", "DS_MAIN_DEV", "DS_MAIN_DEV_GIT")
+[Int]$MandatoryColumnsLeft = 8
+[Int]$MandatoryColumnsRight = 2
+[Int]$MandatoryColumnsTotal = $MandatoryColumnsLeft + $MandatoryColumnsRight
+[string]$StatusDelimiter = " / "
 
 function getBuildStatusTable() {
 	Param(
 		[Parameter(Mandatory=$True)]
-		[ValidateScript({ $ValidProjects.Contains($_) })]
-		[string]$project,
+		[ValidateNotNullOrEmpty()]
+		[string]$projectBranch,
 
 		[Parameter(Mandatory=$True)]
 		[UInt16]$lookbackHours)
 
+	[Int16]$validationKey = $validationKeyOverride
+	[Int16]$validationDimension = $validationDimensionOverride
+	If ($validationKey -Ge 0 -And $validationDimension -Ge 0) {
+		Log Info "Using explicitly set validation key $($validationKey) / dimension $($validationDimension)"
+	} Else {
+		switch ($validationGate) {
+			"Cluster Validation" {
+				$validationKey = 16
+				$validationDimension = 0
+			}
+			"CT Trident" {
+				$validationKey = 339
+				$validationDimension = 0
+			}
+			"DW Gen3" {
+				$validationKey = 266
+				$validationDimension = 0
+			}
+			"Auto-Functionals" {
+				$validationKey = 35
+				$validationDimension = 0
+			}
+			"Auto-Functionals/CI" {
+				$validationKey = 14
+				$validationDimension = 0
+			}
+			"Auto-Functionals/Functional" {
+				$validationKey = 15
+				$validationDimension = 0
+			}
+			"Auto-Functionals/Functional/Engine" {
+				$validationKey = 38
+				$validationDimension = 0
+			}
+			"Auto-Functionals/Functional/XDB" {
+				$validationKey = 39
+				$validationDimension = 0
+			}
+			"Auto-Functionals/Functional/DW" {
+				$validationKey = 6
+				$validationDimension = 0
+			}
+		}
+
+		Log Info "Validation gate [$($validationGate)] -> key $($validationKey) / dimension $($validationDimension)"
+	}
+
 	$cacheValidityInMinutes = 60;
-	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "cache/build_status_table_cache_$($project)_$($lookbackHours)h.txt"
+	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "cache/build_status_table_cache_$($projectBranch)_$($validationKey)-$($validationDimension)_$($lookbackHours)h.txt"
 	If (Test-Path -Path $cacheFilePath) {
 		$creationTime = (Get-Item -Path $cacheFilePath).CreationTime
 		$cacheFileContent = Get-Content -Path $cacheFilePath
 		If ($creationTime -Gt (Get-Date).AddMinutes(-$cacheValidityInMinutes) -And
 			(-Not [string]::IsNullOrWhitespace($cacheFileContent))) {
 			If (-Not $ignoreCache.IsPresent) {
-				Log Info "[$($project)] Using contents from [$($cacheFilePath)] created @ [$($creationTime)]"
+				Log Info "[$($projectBranch)] Using contents from [$($cacheFilePath)] created @ [$($creationTime)]"
 				return $cacheFileContent
 			} Else {
-				Log Warning "[$($project)] Ignoring valid cache @ [$($cacheFilePath)]"
+				Log Warning "[$($projectBranch)] Ignoring valid cache @ [$($cacheFilePath)]"
 			}
 		} Else {
-			Log Warning "[$($project)] Removing stale/empty cache @ [$($cacheFilePath)]"
+			Log Warning "[$($projectBranch)] Removing stale/empty cache @ [$($cacheFilePath)]"
 			Remove-Item -Path $cacheFilePath
 		}
 	}
 
 	[string]$baseUri = "https://troubleshooter.redmond.corp.microsoft.com/CVReport.aspx"
+	[string]$targetUri = "$($baseUri)?LastHours=$($lookbackHours)&PassRate=0&Branch=$($projectBranch)&Title=$($projectBranch)&Key=$($validationKey)&Dim=$($validationDimension)"
 
-	[string]$targetUri = "$($baseUri)?LastHours=$($lookbackHours)&PassRate=0&Branch=$($project)&Title=$($project)&Key=14&Dim=0"
-
-	Log Verbose "[$($project)] Downloading DS CI status from [$($targetUri)]"
+	Log Verbose "[$($projectBranch)] Downloading DS CI status from [$($targetUri)]"
 	$html = (Invoke-WebRequest -Uri $targetUri).Content
+	If ($Null -Eq $html) {
+		ScriptFailure "Failed to get HTML from [$($targetUri)]"
+	}
 
-	Log Verbose "[$($project)] Removing all new lines and link (<a>) tags to avoid XML parsing errors"
+	Log Verbose "[$($projectBranch)] Removing all new lines and link (<a>) tags to avoid XML parsing errors"
 	$htmlMin = $html -replace "(\r?\n)|(</?a[^>]*>)", ""
 
 	$tableMatch = Select-String -InputObject $htmlMin -Pattern "<table[^>]*>.*</table>"
+	If ($Null -Eq $tableMatch) {
+		ScriptFailure "Table element was not found in HTML @ [$($targetUri)].`nTry increasing `$lookbackHours value (currently $($lookbackHours) hours)"
+	}
+
 	$buildStatusTable = $tableMatch.Matches[0].Groups[0].Value
-	Log Info "[$($project)] Caching values @ [$($cacheFilePath)] reusable for $($cacheValidityInMinutes) minutes"
+	Log Info "[$($projectBranch)] Caching values @ [$($cacheFilePath)] reusable for $($cacheValidityInMinutes) minutes"
 	CreateFileIfNotExists -filePath $cacheFilePath
 	$buildStatusTable | Out-File -FilePath $cacheFilePath
 	return $buildStatusTable
@@ -85,25 +161,14 @@ function getGitCommitHash() {
 		[System.Xml.XmlElement]$row,
 
 		[Parameter(Mandatory=$True)]
-		[ValidateScript({ $ValidProjects.Contains($_) })]
-		[string]$project)
+		[ValidateNotNullOrEmpty()]
+		[string]$projectBranch)
 
-	switch ($project) {
-		"DS_MAIN" { return $Null }
-		"DS_MAIN_DEV" { return $row.td[1] }
+	switch ($projectBranch) {
 		"DS_MAIN_DEV_GIT" { return $row.td[2] }
-		Default { return $Null }
+		default { return $Null }
 	}
 }
-
-[int[]]$global:StatusColumns = switch ($project) {
-	"DS_MAIN" { @(10, 13, 14); break }
-	"DS_MAIN_DEV" { @(10, 13, 14); break }
-	"DS_MAIN_DEV_GIT" { @(9, 10, 11, 12, 13, 14); break }
-	DEFAULT { ScriptFailure "Invalid project $($project)"; break }
-}
-[string]$global:StatusDelimiter = " / "
-[string]$global:ValidRowStatus = ($global:StatusColumns | ForEach-Object { "Passed" }) -join $global:StatusDelimiter
 
 function getRowDebugInfo() {
 	[OutputType([string])]
@@ -123,15 +188,30 @@ function getRowStatus() {
 		[System.Xml.XmlElement]$row,
 
 		[Parameter(Mandatory=$True)]
-		[ValidateScript({ $ValidProjects.Contains($_) })]
-		[string]$project)
-	[string[]]$statuses = $global:StatusColumns | ForEach-Object { $row.td[$_].InnerText }
-	ForEach ($status in $statuses) {
-		If ([string]::IsNullOrWhiteSpace($status)) {
-			return $Null
+		[ValidateNotNullOrEmpty()]
+		[Int[]]$validationColumns,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[string]$projectBranch)
+	[object[]]$tds = $row.td
+	If ($tds.Length -Gt $MandatoryColumnsTotal) {
+		[string[]]$statuses = $validationColumns |
+			ForEach-Object { $tds[$_].InnerText } |
+			Where-Object { -Not [string]::IsNullOrEmpty($_) }
+		# Are all columns valid?
+		If ($statuses.Count -Eq $validationColumns.Count) {
+			return $statuses -join $StatusDelimiter
 		}
+
+		If ($showDebugLogs) {
+			Log Warning "Found only $($statuses.Count) valid status columns, $($validationColumns.Count) expected"
+		}
+	} ElseIf ($showDebugLogs) {
+		Log Warning "Found only $($tds.Length) columns, more than $($MandatoryColumnsTotal) mandatory columns expected"
 	}
-	return $statuses -join " / "
+
+	return $Null
 }
 
 function isRowValid() {
@@ -142,12 +222,16 @@ function isRowValid() {
 		[System.Xml.XmlElement]$row,
 
 		[Parameter(Mandatory=$True)]
-		[ValidateScript({ $ValidProjects.Contains($_) })]
-		[string]$project)
+		[ValidateNotNullOrEmpty()]
+		[Int[]]$validationColumns,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[string]$projectBranch)
 
 	[bool]$isRowValid = ($Null -Ne $row.td -And
-		$row.td.Count -Gt [System.Linq.Enumerable]::Max($global:StatusColumns) -And
-		(-Not [string]::IsNullOrWhiteSpace((getRowStatus -row $row -project $project))))
+		$row.td.Count -Gt $MandatoryColumnsTotal -And
+		(-Not [string]::IsNullOrWhiteSpace((getRowStatus -row $row -validationColumns $validationColumns -projectBranch $projectBranch))))
 	If ($showDebugLogs.IsPresent) {
 		[string]$rowDebugInfo = getRowDebugInfo -row $row
 		If ($isRowValid) {
@@ -168,11 +252,15 @@ function getLogTypeForRowBuild() {
 		[System.Xml.XmlElement]$row,
 
 		[Parameter(Mandatory=$True)]
-		[ValidateScript({ $ValidProjects.Contains($_) })]
-		[string]$project)
-	[string]$rowStatus = getRowStatus -row $row -project $project
+		[ValidateNotNullOrEmpty()]
+		[Int[]]$validationColumns,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[string]$projectBranch)
+	[string]$rowStatus = getRowStatus -row $row -validationColumns $validationColumns -projectBranch $projectBranch
 	[string]$logType = "Warning"
-	[bool]$isSuccessfulBuild = $rowStatus -Eq $global:ValidRowStatus
+	[bool]$isSuccessfulBuild = $rowStatus -imatch "^(Passed($($StatusDelimiter))?)+$"
 	If ($isSuccessfulBuild) {
 		$logType = "Success"
 	} ElseIf ($rowStatus.Contains("Failed")) {
@@ -191,97 +279,200 @@ function getLogTypeForRowBuild() {
 	return $logType
 }
 
-function printRow() {
+function printAllRows() {
 	[OutputType([System.Void])]
 	Param(
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
-		[System.Xml.XmlElement]$row,
+		[System.Xml.XmlElement[]]$rows,
+
+		[Parameter(Mandatory=$False)]
+		[AllowNull()]
+		[System.Xml.XmlElement]$rowToStopAt = $Null,
 
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
-		[string]$prefix,
+		[Int[]]$validationColumns,
 
 		[Parameter(Mandatory=$True)]
-		[ValidateScript({ $ValidProjects.Contains($_) })]
-		[string]$project)
-
-	$tds = $row.td;
-	[string]$id = $tds[0]
-	[string]$commitHash = getGitCommitHash -row $row -project $project
-	[string]$descendantId = $tds[3]
-	[string]$descendantType = $tds[4]
-	[string]$time = $tds[5]
-	[string]$alias = $tds[6]
-	[string]$status = getRowStatus -row $row -project $project
-	[string]$latency = $tds[[System.Linq.Enumerable]::Max($global:StatusColumns) + 1]
-
-	[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
-	[bool]$useLogDelimiter = (-Not [string]::IsNullOrEmpty($alias)) -And ($relevantAliases -contains $alias)
-	If ($useLogDelimiter) {
-		LogNewLine
-		Log Info $logDelimiter
+		[ValidateNotNullOrEmpty()]
+		[string]$projectBranch)
+	function printRow() {
+		[OutputType([System.Void])]
+		Param(
+			[Parameter(Mandatory=$True)]
+			[ValidateNotNullOrEmpty()]
+			[System.Xml.XmlElement]$row,
+	
+			[Parameter(Mandatory=$True)]
+			[ValidateNotNullOrEmpty()]
+			[string]$prefix,
+	
+			[Parameter(Mandatory=$True)]
+			[ValidateNotNullOrEmpty()]
+			[Int[]]$validationColumns,
+	
+			[Parameter(Mandatory=$True)]
+			[ValidateNotNullOrEmpty()]
+			[string]$projectBranch)
+	
+		[object[]]$tds = $row.td;
+		[string]$id = $tds[0]
+		[string]$commitHash = getGitCommitHash -row $row -projectBranch $projectBranch
+		[string]$descendantId = $tds[3]
+		[string]$descendantType = $tds[4]
+		[string]$time = $tds[5]
+		[string]$alias = $tds[6]
+		[string]$status = getRowStatus -row $row -validationColumns $validationColumns -projectBranch $projectBranch
+		[string]$latency = $tds[$tds.Count - 2]
+	
+		[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
+		[bool]$useLogDelimiter = (-Not [string]::IsNullOrEmpty($alias)) -And ($relevantAliases -contains $alias)
+		If ($useLogDelimiter) {
+			LogNewLine
+			Log Info $logDelimiter
+		}
+	
+		[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)"
+		[string]$descendantInfo = "-"
+		If (-Not [string]::IsNullOrWhiteSpace($descendantId)) {
+			$descendantInfo = "#$($descendantId)"
+		}
+	
+		If (-Not [string]::IsNullOrWhiteSpace($descendantType)) {
+			$descendantInfo	= "$($descendantInfo) (type $($descendantType))"
+		}
+	
+		[string]$logType = getLogTypeForRowBuild -row $row -validationColumns $validationColumns -projectBranch $projectBranch
+		Log $logType $message -additionalEntries @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
+	
+		If ($useLogDelimiter) {
+			Log Info $logDelimiter
+			LogNewLine
+		}
 	}
 
-	[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)"
-	[string]$descendantInfo = "-"
-	If (-Not [string]::IsNullOrWhiteSpace($descendantId)) {
-		$descendantInfo = "#$($descendantId)"
-	}
-
-	If (-Not [string]::IsNullOrWhiteSpace($descendantType)) {
-		$descendantInfo	= "$($descendantInfo) (type $($descendantType))"
-	}
-
-	[string]$logType = getLogTypeForRowBuild -row $row -project $project
-	Log $logType $message -additionalEntries @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
-
-	If ($useLogDelimiter) {
-		Log Info $logDelimiter
-		LogNewLine
+	For ([Int]$rowIndex = 0; $rowIndex -Lt $rows.Count; $rowIndex++) {
+		$row = $rows[$rowIndex]
+		printRow -row $row -prefix "#$($rowIndex)/$($rows.Count)" -validationColumns $validationColumns -projectBranch $projectBranch
+		If ($row -Eq $rowToStopAt) {
+			break
+		}
 	}
 }
 
-$buildStatusTable = getBuildStatusTable -project $project -lookbackHours $lookbackHours
+$buildStatusTable = getBuildStatusTable -projectBranch $projectBranch -lookbackHours $lookbackHours
 
 $parsedXml = [XML]$buildStatusTable
-[System.Xml.XmlElement[]]$allValidRows = $parsedXml.table.tr | Where-Object { isRowValid -row $_  -project $project }
-[System.Xml.XmlElement[]]$matchingRows = $allValidRows | Where-Object { (getLogTypeForRowBuild -row $_ -project $project) -Eq "Success" }
-If ($Null -Eq $matchingRows -Or $matchingRows.Count -Eq 0) {
-	ScriptFailure "Did not find any successful builds, try increasing the lookback period or checking the URI manually (is the logic in this script wrong?)."
+[System.Xml.XmlElement[]]$allRows = $parsedXml.table.tr
+# Build rows are after the initial header rows
+[Int]$tableHeaderRowIndex = 1
+[Int]$firstBuildRowIndex = $tableHeaderRowIndex + 1
+[string]$increaseLookbackMitigation = "increase `$lookbackHours value (currently $($lookbackHours) hours)"
+[string]$resultRowsMitigation = "`nTry to:`n`t- $($increaseLookbackMitigation) or`n`t- check the URI manually (is the logic in this script wrong?)."
+If ($allRows.Length -Eq $firstBuildRowIndex) {
+	ScriptFailure "Did not find any builds.$($resultRowsMitigation)"
+} ElseIf (-Not ($allRows.Length -Gt $firstBuildRowIndex)) {
+	ScriptFailure "Found only $($allRows.Length) row(s).$($resultRowsMitigation)"
 }
 
-[System.Xml.XmlElement]$matchingRow = $matchingRows[0]
+[System.Xml.XmlElement[]]$tableHeaders = $allRows[$tableHeaderRowIndex].th
+[System.Xml.XmlElement[]]$allBuildRows = $allRows | Select-Object -Skip $firstBuildRowIndex
+# All rows are no longer required, we are only interested in the build rows going further
+Remove-Variable -Name "allRows"
 
-If (-Not [string]::IsNullOrWhiteSpace($targetBuildId)) {
-	$matchingRow = $matchingRows | Where-Object { $_.td[0] -Ieq $targetBuildId } | Select-Object -First 1
-	If ($Null -Eq $matchingRow) {
-		ScriptFailure "Did not find a successful [$($project)] build with ID #$($targetBuildId)"
-	} Else {
-		Log Success "Found a target build #$($targetBuildId), out of $($matchingRows.Count)/$($allValidRows.Count) successful [$($project)] builds`n"
+[HashTable]$validationResultColumnMap = @{}
+If ($tableHeaders.Length -Gt $MandatoryColumnsTotal) {
+	For ([Int]$ci = $MandatoryColumnsLeft; $ci -Lt $tableHeaders.Length - $MandatoryColumnsRight; $ci++) {
+		[string]$validationResultName = $tableHeaders[$ci].InnerText
+		If ([string]::IsNullOrEmpty($validationResultName)) {
+			ScriptFailure "Test validation column #$($ci) has no header name"
+		}
+
+		[string]$statusNotScheduled = "Not Scheduled"
+		If ($allBuildRows.Count -Eq ($allBuildRows | Where-Object { ($_.td.Length -Gt $ci) -And ($statusNotScheduled -Eq $_.td[$ci].InnerText) }).Count) {
+			Log Warning "Test validation column #$($ci) [$($validationResultName)] has all $($allBuildRows.Count) row(s) with the status [$($statusNotScheduled)] in the past $($lookbackHours)h." `
+				-additionalEntries @("Ignoring it from further checks.", "If you feel that this is a mistake then $($increaseLookbackMitigation).")
+		} Else {
+			$validationResultColumnMap[$ci] = $validationResultName
+		}
 	}
 } Else {
-	Log Success "Found $($matchingRows.Count)/$($allValidRows.Count) successful [$($project)] builds, taking first one`n"
+	ScriptFailure "Found only $($tds.Length) columns, more than $($MandatoryColumnsTotal) mandatory columns expected"
+}
+
+If (0 -Eq $validationResultColumnMap.Keys.Count) {
+	ScriptFailure "Did not find any test validation columns in $($allBuildRows.Count) build row(s).$($resultRowsMitigation)"
+}
+
+[Int[]]$validationColumns = $validationResultColumnMap.Keys | Sort-Object
+Log Info "Found $($validationColumns.Count)/$($tableHeaders.Count) test validation columns:" `
+	-additionalEntries ($validationColumns | ForEach-Object { "#$($_) [$($validationResultColumnMap[$_])]" })
+# Test validation column map is no longer required, we are only interested in the indexes
+Remove-Variable -Name "validationResultColumnMap"
+
+[System.Xml.XmlElement[]]$allValidBuildRows = $allBuildRows | Where-Object { isRowValid -row $_ -validationColumns $validationColumns -projectBranch $projectBranch }
+[System.Xml.XmlElement[]]$completedBuildRows = $allValidBuildRows | Where-Object {
+	[string[]]$inProgressStatuses = @("Not Scheduled", "Running")
+	[System.Xml.XmlElement[]]$row = $_
+	[string[]]$completedValidationColumns = $validationColumns |
+		Where-Object { -Not ($inProgressStatuses -icontains $row.td[[Int]$_].InnerText ) }
+	return $completedValidationColumns.Count -Eq $validationColumns.Count
+}
+
+If (0 -Eq $completedBuildRows.Count) {
+	If ($printAllBuildInfo.IsPresent) {
+		printAllRows -rows $allValidBuildRows -validationColumns $validationColumns -projectBranch $projectBranch
+	}
+
+	ScriptFailure "Did not find any rows with completed validations, $($allBuildRows.Count) rows are still in progress.`nPlease $($increaseLookbackMitigation)."
+}
+
+Log Info "Found $($completedBuildRows.Count)/$($allBuildRows.Count) build row(s) with completed validations."
+
+[System.Xml.XmlElement[]]$matchingBuildRows = $completedBuildRows | Where-Object { (getLogTypeForRowBuild -row $_ -validationColumns $validationColumns -projectBranch $projectBranch) -Eq "Success" }
+If ($Null -Eq $matchingBuildRows -Or $matchingBuildRows.Count -Eq 0) {
+	If ($printAllBuildInfo.IsPresent) {
+		printAllRows -rows $allValidBuildRows -validationColumns $validationColumns -projectBranch $projectBranch
+	}
+
+	ScriptFailure "Did not find any successful builds out of $($allBuildRows.Count) build row(s).$($resultRowsMitigation)"
+}
+
+[System.Xml.XmlElement]$matchingBuildRow = $matchingBuildRows[0]
+
+If (-Not [string]::IsNullOrWhiteSpace($targetBuildId)) {
+	$matchingBuildRow = $matchingBuildRows | Where-Object { $_.td[0] -Ieq $targetBuildId } | Select-Object -First 1
+	If ($Null -Eq $matchingBuildRow) {
+		If ($printAllBuildInfo.IsPresent) {
+			printAllRows -rows $allValidBuildRows -validationColumns $validationColumns -projectBranch $projectBranch
+		}
+
+		ScriptFailure "Did not find a successful [$($projectBranch)] build with ID #$($targetBuildId)"
+	} Else {
+		Log Success "Found a target build #$($targetBuildId), out of $($matchingBuildRows.Count)/$($allValidBuildRows.Count) successful [$($projectBranch)] builds`n"
+	}
+} Else {
+	Log Success "Found $($matchingBuildRows.Count)/$($allValidBuildRows.Count) successful [$($projectBranch)] builds, taking first one`n"
 }
 
 # Matching rows variable is no longer required, we are only interested in the first matching row
-Remove-Variable -Name "matchingRows"
+Remove-Variable -Name "matchingBuildRows"
 
 # Print all the build status rows
 # - up to (and including) the first matching one
 # - or all of them, if the appropriate flag is set
-For ($rowIndex = 0; $rowIndex -Lt $allValidRows.Count; $rowIndex++) {
-	$row = $allValidRows[$rowIndex]
-	printRow -row $row -prefix "#$($rowIndex)/$($allValidRows.Count)" -project $project
-	If ((-Not $printAllBuildInfo.IsPresent) -And ($row -Eq $matchingRow)) {
-		break;
-	}
+[System.Xml.XmlElement]$rowToStopPrintingAt = $matchingBuildRow
+If ($printAllBuildInfo.IsPresent) {
+	$rowToStopPrintingAt = $Null
 }
 
-[string]$commitHash = getGitCommitHash -row $matchingRow -project $project
+printAllRows -rows $allValidBuildRows -rowToStopAt $rowToStopPrintingAt -validationColumns $validationColumns -projectBranch $projectBranch
+
+[string]$commitHash = getGitCommitHash -row $matchingBuildRow -projectBranch $projectBranch
 
 If ([string]::IsNullOrWhiteSpace($commitHash)) {
-	ScriptFailure "Git commit hash not found for project [$($project)]"
+	ScriptFailure "Git commit hash not found for project [$($projectBranch)]"
 }
 
 If ($sync.IsPresent) {

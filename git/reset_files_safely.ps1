@@ -32,7 +32,13 @@ ForEach ($diffFile in $diffFiles) {
 
 	$fileName = Split-Path -Path $diffFile -Leaf
 	If (ConfirmAction "Reset file #$($count)/$($diffFiles.Count) [$($fileName)])") {
-		RunGitCommandSafely "(git checkout origin/$($defaultBranchName) -- `"$($diffFile)`") -Or (git rm `"$($diffFile)`")"
+		[string]$quotedFilePath = "`"$($diffFile)`""
+		# Try to checkout the original file (without exiting the script on failure),
+		# and fallback to removing the file (with exiting the script on failure).
+		If (-Not (RunGitCommandSafely "checkout" -parameters @("origin/$($defaultBranchName)", "--", $quotedFilePath))) {
+			RunGitCommand "rm" -parameters @($quotedFilePath)
+		}
+
 		Log Success "Reset file [$($fileName)]" -indentLevel 1
 	} Else {
 		Log Verbose "Skipping reset of file [$($fileName)]" -indentLevel 1

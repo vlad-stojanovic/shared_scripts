@@ -98,7 +98,7 @@ ForEach ($resultObject in $resultObjects) {
 
 			If ($action -IEq "delete") {
 				# Ignore output from the command
-				& "$($PSScriptRoot)/work/delete_objects_sync.ps1" -dirsToDelete @($directoryPath) | Out-Null
+				& "$($PSScriptRoot)/work/delete_objects_sync.ps1" -objectsToDelete @($directoryPath) | Out-Null
 			}
 
 			Log Warning "$($actionVerb) folder #$($doi + 1)/$($dirObjects.Count) [$($directoryPath)]" -additionalEntries @("with $($dumpCount) dump file(s) of size $(GetSizeString -size $dumpSize -unit 'B' -decimalPoints $sizeDecimalPoints)", "latest dump occurred @ $($dumpTime.ToString($dateFormat))")

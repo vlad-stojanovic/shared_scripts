@@ -25,7 +25,8 @@ function deleteTempEntities() {
 		ForEach ($tempInfo in $tempInfos) {
 			# Check whether we have already deleted the entity (by previously deleting its parent directory)
 			If (Test-Path -Path $tempInfo.FullName) {
-				If ($confirm.IsPresent -And (ConfirmAction "Delete temp $($entityType) [$($tempInfo.FullName)], created @ $($tempInfo.CreationTime)" -defaultYes)) {
+				If ((-Not $confirm.IsPresent) -Or (ConfirmAction "Delete temp $($entityType) [$($tempInfo.FullName)], created @ $($tempInfo.CreationTime)" -defaultYes)) {
+					Log Verbose "Deleting $($entityType) [$($tempInfo.FullName)] (modified @ $($tempInfo.LastWriteTime))"
 					Remove-Item -Path $tempInfo.FullName -Recurse:($entityType -IEq "dir") -Force
 				}
 			}

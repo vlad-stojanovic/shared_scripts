@@ -7,56 +7,25 @@
 # Include safe Git helper functions
 . "$($PSScriptRoot)/_git_common_safe.ps1"
 
-function LogGitStashMessageOnFailure() {
-	[OutputType([System.Void])]
-	Param(
-		[Parameter(Mandatory=$True, HelpMessage="Number of changed files that are stashed, and should be manually popped in case of command failure")]
-		[UInt16]$stashedFileCount)
-	[string]$stashCmd = "git stash pop"
-	If ($stashedFileCount -Gt 0) {
-		Log Warning "Remember to run '$($stashCmd)' to restore changes in $($stashedFileCount) files"
-	} Else {
-		Log Verbose "No files stashed - no restore needed via '$($stashCmd)'"
-	}
-}
-
-function RunGitCommandSafely() {
+function RunGitCommand() {
 	[OutputType([System.Void])]
 	Param(
 		[Parameter(Mandatory=$True, HelpMessage="Git command to be executed")]
 		[ValidateNotNullOrEmpty()]
 		[string]$gitCommand,
 
+		[Parameter(Mandatory=$False, HelpMessage="Git command parameters")]
+		[AllowNull()]
+		[string[]]$parameters = $Null,
+
 		[Parameter(Mandatory=$False, HelpMessage="Number of changed files that are stashed, and should be manually popped in case of command failure")]
 		[UInt16]$changedFileCount = 0)
-	# Return on command success.
-	# Perform additional processing only on command failure.
-	[bool]$execStatus = RunCommand $gitCommand -silentCommandExecution
-	If ($execStatus) {
-		return
+	# Exit the script on command failure.
+	[bool]$execStatus = RunGitCommandSafely -gitCommand $gitCommand -parameters $parameters -changedFileCount $changedFileCount
+	If (-Not $execStatus) {
+		ScriptFailure "Git $($gitCommand) failed"
 	}
 
-	# Extract the Git operation used
-	[string]$operationLC = "command"
-	If ($gitCommand.ToLower() -imatch "^git\s+([\w-]+)\b") {
-		$operationLC = $Matches[1]
-
-		# Process operations that might fail, but can be continued/aborted after manual intervention
-		[string[]]$continuableOperationsLC = @("cherry-pick", "merge", "rebase", "revert")
-		If ($continuableOperationsLC -icontains $operationLC) {
-			Log Warning "Resolve all the $($operationLC) conflicts manually and then continue the $($operationLC) operation"
-			If (ConfirmAction "Did you resolve all the $($operationLC) conflicts") {
-				RunCommand "git $($operationLC) --continue" -silentCommandExecution | Out-Null
-				# Git operation recovered after the initial failure.
-				return
-			} ElseIf (ConfirmAction "Abort $($operationLC) operation" -defaultYes) {
-				RunCommand "git $($operationLC) --abort" -silentCommandExecution | Out-Null
-			}
-		}
-	}
-
-	LogGitStashMessageOnFailure -stashedFileCount $changedFileCount
-	ScriptFailure "Git $($operationLC) failed"
 }
 
 function UpdateBranchesInfoFromRemote() {
@@ -71,28 +40,46 @@ function UpdateBranchesInfoFromRemote() {
 	Log Warning "If 'git fetch' takes a long time - best to first" -additionalEntries @(
 		"clean up loose objects via 'git prune' or",
 		"optimize the local repo via 'git gc'") -entryPrefix "- "
-	RunGitCommandSafely -gitCommand "git fetch -pq --jobs=$($jobCount)"
+	RunGitCommand -gitCommand "fetch" -parameters @("-pq", "--jobs=$($jobCount)")
 }
 
 function GetCurrentBranchName() {
 	[OutputType([string])]
 	Param()
-	[string]$currentBranchName = GetCurrentBranchNameNoValidation
+	[string]$currentBranchName = GetCurrentBranchNameSafely
 	If ([string]::IsNullOrWhiteSpace($currentBranchName)) {
 		ScriptFailure "Unable to get current Git branch name"
 	}
+
 	return $currentBranchName;
 }
 
 function StashChangesAndGetChangedFileCount() {
 	[OutputType([Int])]
 	Param()
-	[string[]]$allChangedFiles = git status -su;
+	[string[]]$allChangedFiles = git status -su | ForEach-Object { $_.Trim() }
 	If ($allChangedFiles.Count -Eq 0 ) {
 		Log Success "No files changed -> no stashing"
 	} Else {
-		Log Warning "Stashing $($allChangedFiles.Count) changed files"
-		RunGitCommandSafely -gitCommand "git stash --include-untracked"
+		[int]$maxEntries = 8
+		[string[]]$additionalEntries = $allChangedFiles
+		If ($allChangedFiles.Count -Gt $maxEntries) {
+			$additionalEntries = ($allChangedFiles | Select-Object -First ($maxEntries - 1)) + "and $($allChangedFiles.Count - $maxEntries + 1) more..."
+		}
+
+		Log Warning "Stashing $($allChangedFiles.Count) changed files" -additionalEntries $additionalEntries -entryPrefix "- "
+		RunGitCommand -gitCommand "stash" -parameters @("--include-untracked")
 	}
+
 	return $allChangedFiles.Count;
+}
+
+function UnstashChanges() {
+	[OutputType([System.Void])]
+	Param(
+		[Parameter(Mandatory=$False, HelpMessage="Number of changed files that are stashed, and should be manually popped in case of command failure")]
+		[UInt16]$changedFileCount)
+	If ($changedFileCount -Gt 0) {
+		RunGitCommand -gitCommand "stash" -parameters @("pop") -changedFileCount $changedFileCount
+	}
 }

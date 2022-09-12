@@ -18,6 +18,10 @@ Param(
 	[Parameter(Mandatory=$False, HelpMessage="Test class names to be run, if blank/empty all the test classes in the file will be used")]
 	[string[]]$classNames = @(),
 
+	[Parameter(Mandatory=$False, HelpMessage="Test names to be run, if provided then either a file having a single class or a single `$classNames element has to be explicitly provided")]
+	[AllowNull()]
+	[string]$testName = $Null,
+
 	[Parameter(Mandatory=$False, HelpMessage="Tests to be included in the test run e.g. FULL or EXTENDED")]
 	[ValidateSet("/includefull", "/includeextended")]
 	[string]$includeOption = "/includefull",
@@ -110,6 +114,14 @@ For ([Uint16]$ci = 0; $ci -Lt $classNames.Length; $ci++) {
 	[string]$classNameShort = $fullClassName -replace "^.*\.",""
 	[string]$classInfo = "Test class '$($classNameShort)' #$($ci + 1)/$($classNames.Length)"
 	[string]$testCommand = "$($suitesPath) /assembly $($assemblyName) /className $($fullClassName) /envFile `"$($environmentXmlFilePath)`" $($includeOption)"
+	If (-Not [string]::IsNullOrEmpty($testName)) {
+		If (1 -Ne $classNames.Count) {
+			ScriptFailure "When test name (e.g. '$($testName)') is provided - a single class has to be provided, but $($classNames.Count) classes detected"
+		}
+
+		$testCommand = "$($testCommand) /testId $($testName)"
+	}
+
 	Log Info "$($classInfo) command:" -additionalEntries @("$($testCommand)`n")
 	If (-Not $dryRun.IsPresent) {
 		If ($ci -Gt 0) {

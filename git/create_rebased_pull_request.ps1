@@ -1,5 +1,5 @@
 Param(
-	[Parameter(Mandatory=$False, "Rebased branch name, in full or short format. If not provided the current branch name will be used as base (and slightly modified).")]
+	[Parameter(Mandatory=$False, HelpMessage="Rebased branch name, in full or short format. If not provided the current branch name will be used as base (and slightly modified).")]
 	[string]$rebasedBranchName = $Null)
 
 # Include git helper functions

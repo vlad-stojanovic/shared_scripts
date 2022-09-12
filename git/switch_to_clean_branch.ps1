@@ -45,19 +45,19 @@ If ([string]::IsNullOrWhiteSpace($existingBranchName)) {
 $gitFilesChanged = StashChangesAndGetChangedFileCount
 
 # Reset all commits worked on the current branch
-RunGitCommandSafely -gitCommand "git reset --hard origin/$(GetDefaultBranchName)" -changedFileCount $gitFilesChanged
+RunGitCommand -gitCommand "reset" -parameters @("--hard origin/$(GetDefaultBranchName)") -changedFileCount $gitFilesChanged
 
 If ([string]::IsNullOrWhiteSpace($existingBranchName)) {
-	RunGitCommandSafely -gitCommand "git checkout -b $($branchFullName)" -changedFileCount $gitFilesChanged;
+	RunGitCommand -gitCommand "checkout" -parameters @("-b $($branchFullName)") -changedFileCount $gitFilesChanged;
 	Log Success "Successfully created new branch [$($branchFullName)]"
 } Else {
 	Log Warning "Switching to existing branch [$($existingBranchName)]"
-	RunGitCommandSafely -gitCommand "git checkout $($existingBranchName)" -changedFileCount $gitFilesChanged
+	RunGitCommand -gitCommand "checkout" -parameters @($existingBranchName) -changedFileCount $gitFilesChanged
 	If (DoesBranchExist -fullBranchName $existingBranchName -origin remote) {
 		If ($skipPullOnNewBranch.IsPresent) {
 			Log Warning "Skipping pull on the switched branch, please merge/pull manually afterwards"
 		} Else {
-			RunGitCommandSafely -gitCommand "git pull -q" -changedFileCount $gitFilesChanged
+			RunGitCommand -gitCommand "pull" -parameters @("-q") -changedFileCount $gitFilesChanged
 		}
 	} Else {
 		Log Warning "Branch [$($existingBranchName)] does not exist in remote origin. Skipping pull."
@@ -66,6 +66,4 @@ If ([string]::IsNullOrWhiteSpace($existingBranchName)) {
 }
 
 # Stash pop initial changes
-If ($gitFilesChanged -Gt 0) {
-	RunGitCommandSafely -gitCommand "git stash pop" -changedFileCount $gitFilesChanged
-}
+UnstashChanges -changedFileCount $gitFilesChanged

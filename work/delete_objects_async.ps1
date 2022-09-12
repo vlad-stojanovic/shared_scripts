@@ -1,6 +1,6 @@
 Param(
 	[Parameter(Mandatory=$True)]
-	[string[]]$dirsToDelete,
+	[string[]]$objectsToDelete,
 
 	[Parameter(Mandatory=$False)]
 	[string]$rootDir,
@@ -15,22 +15,22 @@ Param(
 
 $jobMap = @{}
 
-ForEach ($dir in $dirsToDelete) {
-	[string]$targetDir = $dir
+ForEach ($object in $objectsToDelete) {
+	[string]$targetObject = $object
 	If (-Not [string]::IsNullOrWhiteSpace($rootDir)) {
-		$targetDir = Join-Path -Path $rootDir -ChildPath $dir
+		$targetObject = Join-Path -Path $rootDir -ChildPath $object
 	}
 
-	If (Test-Path -Path $targetDir -PathType Container){
-		Log Warning "Deleting entries from [$($targetDir)] directory"
+	If (Test-Path -Path $targetObject){
+		Log Warning "Deleting entry [$($targetObject)]"
 
 		$job = Start-Job -ScriptBlock {
-				Param([string]$targetDir, [string]$deleteScriptPath)
-				& $deleteScriptPath -dirsToDelete @($targetDir)
-			} -ArgumentList @($targetDir, "$($PSScriptRoot)\delete_objects_sync.ps1") -Name "Removal of [$targetDir] directory"
-		$jobMap.Add($targetDir, $job.Id)
+				Param([string]$targetObject, [string]$deleteScriptPath)
+				& $deleteScriptPath -objectsToDelete @($targetObject)
+			} -ArgumentList @($targetObject, "$($PSScriptRoot)\delete_objects_sync.ps1") -Name "Removal of [$targetObject] object"
+		$jobMap.Add($targetObject, $job.Id)
 	} Else {
-		Log Verbose "Folder does not exist [$($targetDir)]"
+		Log Verbose "Object does not exist [$($targetObject)]"
 	}
 }
 
@@ -44,18 +44,18 @@ Do {
 	Log Info "Checking status of $($jobMap.Count) remaining deletion job(s) in $($waitTimeS) seconds (elapsed time $(GetStopWatchDuration -stopWatch $stopWatch))"
 	Start-Sleep -Seconds $waitTimeS
 
-	[string[]]$dirs = $jobMap.Keys
-	ForEach ($dir in $dirs) {
-		$job = Get-Job -Id $jobMap[$dir]
+	[string[]]$objects = $jobMap.Keys
+	ForEach ($object in $objects) {
+		$job = Get-Job -Id $jobMap[$object]
 		If ("Completed" -Eq $job.State) {
-			Log Success "Done with [$($dir)] after $(GetStopWatchDuration -stopWatch $stopWatch)" -indentLevel 1
+			Log Success "Done with [$($object)] after $(GetStopWatchDuration -stopWatch $stopWatch)" -indentLevel 1
 
 			# Clean any remaining jobs with the same name
 			# that might be previously started but not removed.
 			Remove-Job -Name $job.Name -ErrorAction SilentlyContinue
-			$jobMap.Remove($dir)
+			$jobMap.Remove($object)
 		} Else {
-			Log Verbose "Deletion of [$($dir)] is in state: $($job.State), for job '$($job.Name)'" -indentLevel 1
+			Log Verbose "Deletion of [$($object)] is in state: $($job.State), for job '$($job.Name)'" -indentLevel 1
 		}
 	}
 } While ($jobMap.Count -Gt 0)
