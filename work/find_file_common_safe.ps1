@@ -94,20 +94,27 @@ function find_project_for_file_in_start_dir() {
 	}
 
 	[string]$projectPath = $Null
-	[string]$folderPath = $fileAbsPath
+	[string]$folderPath = Split-Path -Path $fileAbsPath -Parent
+	[string]$searchFileNamePattern = [System.Text.RegularExpressions.Regex]::Escape((Split-Path -Path $fileAbsPath -Leaf))
+	# We don't extend pattern for file name patterns, it is always the same e.g. ending with "*.cs"
+	[string]$searchFileExtPattern = [System.Text.RegularExpressions.Regex]::Escape("*$([System.IO.Path]::GetExtension($filePath))") + "[`"']"
+	[string]$excludePath = ""
 	While ([string]::IsNullOrWhiteSpace($projectPath)) {
-		# Do not search recursively (again) through the previously searched folder
-		[string[]]$excludePaths = @($folderPath)
-		$folderPath = Split-Path -Path $folderPath -Parent
 		If ([string]::IsNullOrWhiteSpace($folderPath)) {
 			break;
 		}
 
-		Log Verbose "Checking folder path [$($folderPath)]"
-		$searchPattern = "\b$(Split-Path -Path $fileAbsPath -Leaf)\b"
+		# Either match by file name or projects that include all the files (with the appropriate extension).
+		[string[]]$searchPatterns = @(
+			, "\b$($searchFileNamePattern)[`"']"
+			, $searchFileExtPattern
+		)
+		# Create a disjunction of all the sub-patterns.
+		[string]$searchPattern = ($searchPatterns | ForEach-Object { "($($_))" }) -join "|"
+		Log Verbose "Checking folder path [$($folderPath)]" # for search patterns:" -additionalEntries $searchPatterns
 		[string[]]$projectFiles = FindFilesContainingPattern `
 			-searchDirectory $folderPath -fileFilter "*proj" `
-			-pattern $searchPattern -excludePaths $excludePaths
+			-pattern $searchPattern -excludePaths @($excludePath)
 		If (-Not (CheckEntryCount -entries $projectFiles -description "matching project files" -location $folderPath -max -indentLevel 1)) {
 			# We found two or more project files
 			return $Null
@@ -123,6 +130,16 @@ function find_project_for_file_in_start_dir() {
 			Log Warning "Searched the entire starting directory [$($startDir)]"
 			break
 		}
+
+		[string]$prevFolderName = Split-Path -Path $folderPath -Leaf
+		$folderPath = Split-Path -Path $folderPath -Parent
+
+		# Do not search recursively (again) through the previously searched folder
+		$excludePath = $prevFolderName
+
+		# Filter on the exact relative path for the file name/ext
+		[string]$prevFolderNamePattern = [System.Text.RegularExpressions.Regex]::Escape($prevFolderName)
+		$searchFileNamePattern = "$($prevFolderNamePattern)[\\/]$($searchFileNamePattern)"
 	}
 
 	If ([string]::IsNullOrWhiteSpace($projectPath)) {

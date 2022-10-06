@@ -43,10 +43,14 @@ Param(
 	[switch]$printAllBuildInfo,
 
 	[Parameter(Mandatory=$False, HelpMessage="Show debug logs (internal to this script)")]
-	[switch]$showDebugLogs)
+	[switch]$showDebugLogs,
+
+	[Parameter(Mandatory=$False, HelpMessage="Skip (i.e. not log) additional git details for commits")]
+	[switch]$skipGitDetails)
 
 # Include common helper functions
 . "$($PSScriptRoot)/common/_common.ps1"
+. "$($PSScriptRoot)/git/_git_common_safe.ps1"
 
 $ErrorActionPreference = "Stop"
 
@@ -151,6 +155,15 @@ function getBuildStatusTable() {
 	Log Info "[$($projectBranch)] Caching values @ [$($cacheFilePath)] reusable for $($cacheValidityInMinutes) minutes"
 	CreateFileIfNotExists -filePath $cacheFilePath
 	$buildStatusTable | Out-File -FilePath $cacheFilePath
+
+	# If we are not using cache, but getting new data then update branch info first.
+	If (-Not $skipGitDetails.IsPresent) {
+		LogNewLine
+		Log Verbose "Updating branch info in order to get correct commit details"
+		UpdateBranchesInfoFromRemoteSafely | Out-Null
+		LogNewLine
+	}
+
 	return $buildStatusTable
 }
 
@@ -314,7 +327,11 @@ function printAllRows() {
 	
 			[Parameter(Mandatory=$True)]
 			[ValidateNotNullOrEmpty()]
-			[string]$projectBranch)
+			[string]$projectBranch,
+	
+			[Parameter(Mandatory=$True)]
+			[AllowNull()]
+			[string]$currentCommit)
 	
 		[object[]]$tds = $row.td;
 		[string]$id = $tds[0]
@@ -327,7 +344,9 @@ function printAllRows() {
 		[string]$latency = $tds[$tds.Count - 2]
 	
 		[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
-		[bool]$useLogDelimiter = (-Not [string]::IsNullOrEmpty($alias)) -And ($relevantAliases -contains $alias)
+		# The current commit might be full version, and the build-row commit short, so only check it as a prefix.
+		[bool]$isCurrent = (-Not [string]::IsNullOrEmpty($currentCommit)) -And $currentCommit.StartsWith($commitHash)
+		[bool]$useLogDelimiter = $isCurrent -Or ($relevantAliases -icontains $alias)
 		If ($useLogDelimiter) {
 			LogNewLine
 			Log Info $logDelimiter
@@ -344,17 +363,33 @@ function printAllRows() {
 		}
 	
 		[string]$logType = getLogTypeForRowBuild -row $row -validationColumns $validationColumns -projectBranch $projectBranch
-		Log $logType $message -additionalEntries @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
-	
+		[string[]]$additionalEntries = @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
+		If (-Not $skipGitDetails.IsPresent) {
+			# See https://git-scm.com/docs/git-show#_pretty_formats for format descriptions
+			[string[]]$commitInfo = git show -s --format="Author:`t%an (%ae)%nTitle:`t%s%nMerged:`t%ar" $commitHash
+			If (0 -Eq $commitInfo.Count) {
+				$commitInfo = @("Could not find commit information (consider running 'git fetch' first) !")
+			}
+
+			$additionalEntries = $commitInfo + $additionalEntries
+		}
+
+		Log $logType $message -additionalEntries $additionalEntries
+
+		If ($isCurrent) {
+			Log Success "Local master branch is currently on this commit"
+		}
+
 		If ($useLogDelimiter) {
 			Log Info $logDelimiter
 			LogNewLine
 		}
 	}
 
+	[string]$currentCommit = GetCodeVersion -fullBranchName master -short
 	For ([Int]$rowIndex = 0; $rowIndex -Lt $rows.Count; $rowIndex++) {
 		$row = $rows[$rowIndex]
-		printRow -row $row -prefix "#$($rowIndex)/$($rows.Count)" -validationColumns $validationColumns -projectBranch $projectBranch
+		printRow -row $row -prefix "#$($rowIndex)/$($rows.Count)" -validationColumns $validationColumns -projectBranch $projectBranch -currentCommit $currentCommit
 		If ($row -Eq $rowToStopAt) {
 			break
 		}

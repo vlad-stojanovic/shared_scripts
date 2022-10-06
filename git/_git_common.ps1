@@ -25,22 +25,15 @@ function RunGitCommand() {
 	If (-Not $execStatus) {
 		ScriptFailure "Git $($gitCommand) failed"
 	}
-
 }
 
 function UpdateBranchesInfoFromRemote() {
 	[OutputType([System.Void])]
 	Param()
-	[UInt16]$jobCount = 1
-	If ([System.Environment]::ProcessorCount -Ge 3) {
-		# Take 2/3 of the available processors
-		$jobCount = [System.Environment]::ProcessorCount * 2 / 3
+	[bool]$execStatus = UpdateBranchesInfoFromRemoteSafely
+	If (-Not $execStatus) {
+		ScriptFailure "Updating branch info from remote failed"
 	}
-
-	Log Warning "If 'git fetch' takes a long time - best to first" -additionalEntries @(
-		"clean up loose objects via 'git prune' or",
-		"optimize the local repo via 'git gc'") -entryPrefix "- "
-	RunGitCommand -gitCommand "fetch" -parameters @("-pq", "--jobs=$($jobCount)")
 }
 
 function GetCurrentBranchName() {

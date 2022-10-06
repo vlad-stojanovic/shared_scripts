@@ -64,6 +64,21 @@ function RunGitCommandSafely() {
 	return $False
 }
 
+function UpdateBranchesInfoFromRemoteSafely() {
+	[OutputType([bool])]
+	Param()
+	[UInt16]$jobCount = 1
+	If ([System.Environment]::ProcessorCount -Ge 3) {
+		# Take 2/3 of the available processors
+		$jobCount = [System.Environment]::ProcessorCount * 2 / 3
+	}
+
+	Log Warning "If 'git fetch' takes a long time - best to first" -additionalEntries @(
+		"clean up loose objects via 'git prune' or",
+		"optimize the local repo via 'git gc'") -entryPrefix "- "
+	return (RunGitCommandSafely -gitCommand "fetch" -parameters @("-pq", "--jobs=$($jobCount)"))
+}
+
 function GetDefaultBranchName() {
 	[OutputType([string])]
 	Param()
@@ -123,8 +138,13 @@ function CheckCommitDetails() {
 	Param(
 		[Parameter(Mandatory=$True, HelpMessage="Commit to check")]
 		[ValidateNotNullOrEmpty()]
-		[string]$commit)
-	[string[]]$commitDetails = git show -s --pretty=fuller $commit
+		[string]$commit,
+
+		[Parameter(Mandatory=$False, HelpMessage="Format of the expected commit details")]
+		[ValidateNotNullOrEmpty()]
+		# See https://git-scm.com/docs/git-show#_pretty_formats for format descriptions
+		[string]$prettyFormat = "fuller")
+	[string[]]$commitDetails = git show -s --pretty=$prettyFormat $commit
 	If ($Null -Eq $commitDetails -Or $commitDetails.Count -Eq 0) {
 		Log Warning "Could not find commit [$($commit)] details." -additionalEntries @("Did you perform 'git fetch/pull/merge' to get the latest information?")
 		return $False
@@ -279,22 +299,24 @@ function IsCommitByAuthor() {
 		[Parameter(Mandatory=$True, HelpMessage="Expected author email for the provided commit")]
 		[ValidateNotNullOrEmpty()]
 		[string]$authorEmail)
-	# Author is matched by parts of either alias or email so it is safer to check full email (in brackets),
-	# in order to avoid false positives. 
-	[string[]]$commitInfo = (git log $commit --no-decorate -n 1 --author="<$($authorEmail)>" --pretty=short) -join [System.Environment]::NewLine
-	If ([string]::IsNullOrWhiteSpace($commitInfo)) {
-		# Commit is not by the expected author - check does it even exist (and if so - who is the actual author)
-		$commitInfo = git log $commit --no-decorate -n 1 --pretty=short
-		If ([string]::IsNullOrWhiteSpace($commitInfo)) {
-			Log Error "$($commitDescription) commit [$($commit)] not found"
-		} Else {
-			Log Warning "$($commitDescription) commit information (unexpected author email):`n$($commitInfo)"
-		}
-
+	[string]$actualCommitAuthor = git log $commit --no-decorate --pretty=format:'%ae' -n 1
+	If ([string]::IsNullOrWhiteSpace($actualCommitAuthor)) {
+		Log Error "$($commitDescription) commit [$($commit)] author not found"
 		return $False
-	} 
+	}
+
+	[string]$commitInfo = (git log $commit --no-decorate -n 1 --pretty=short) -join [System.Environment]::NewLine
+	If ([string]::IsNullOrWhiteSpace($commitInfo)) {
+		Log Error "$($commitDescription) commit [$($commit)] not found"
+		return $False
+	}
+
+	If ($actualCommitAuthor -INe $authorEmail) {
+		Log Warning "$($commitDescription) commit information (unexpected author email):" -additionalEntries @($commitInfo)
+		return $False
+	}
 	
-	Log Success "$($commitDescription) commit information:`n$($commitInfo)"
+	Log Success "$($commitDescription) commit information:" -additionalEntries @($commitInfo)
 	return $True
 }
 
