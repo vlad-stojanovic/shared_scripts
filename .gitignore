@@ -1,2 +1,2 @@
 cache/build_status_table_cache_*.txt
-logs/script_execution_*.log
+logs/*.log
