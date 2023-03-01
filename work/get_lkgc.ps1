@@ -49,8 +49,8 @@ Param(
 	[switch]$skipGitDetails)
 
 # Include common helper functions
-. "$($PSScriptRoot)/common/_common.ps1"
-. "$($PSScriptRoot)/git/_git_common_safe.ps1"
+. "$($PSScriptRoot)/../common/_common.ps1"
+. "$($PSScriptRoot)/../git/_git_common_safe.ps1"
 
 $ErrorActionPreference = "Stop"
 
@@ -58,6 +58,8 @@ $ErrorActionPreference = "Stop"
 [Int]$MandatoryColumnsRight = 2
 [Int]$MandatoryColumnsTotal = $MandatoryColumnsLeft + $MandatoryColumnsRight
 [string]$StatusDelimiter = " / "
+
+[bool]$global:isBranchInfoUpdated = $False
 
 function getBuildStatusTable() {
 	Param(
@@ -116,7 +118,7 @@ function getBuildStatusTable() {
 	}
 
 	$cacheValidityInMinutes = 60;
-	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "cache/build_status_table_cache_$($projectBranch)_$($validationKey)-$($validationDimension)_$($lookbackHours)h.txt"
+	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "../cache/build_status_table_cache_$($projectBranch)_$($validationKey)-$($validationDimension)_$($lookbackHours)h.txt"
 	If (Test-Path -Path $cacheFilePath) {
 		$creationTime = (Get-Item -Path $cacheFilePath).CreationTime
 		$cacheFileContent = Get-Content -Path $cacheFilePath
@@ -162,6 +164,8 @@ function getBuildStatusTable() {
 		Log Verbose "Updating branch info in order to get correct commit details"
 		UpdateBranchesInfoFromRemoteSafely | Out-Null
 		LogNewLine
+
+		$global:isBranchInfoUpdated = $True
 	}
 
 	return $buildStatusTable
@@ -202,11 +206,7 @@ function getRowStatus() {
 
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
-		[Int[]]$validationColumns,
-
-		[Parameter(Mandatory=$True)]
-		[ValidateNotNullOrEmpty()]
-		[string]$projectBranch)
+		[Int[]]$validationColumns)
 	[object[]]$tds = $row.td
 	If ($tds.Length -Gt $MandatoryColumnsTotal) {
 		[string[]]$statuses = $validationColumns |
@@ -236,15 +236,11 @@ function isRowValid() {
 
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
-		[Int[]]$validationColumns,
-
-		[Parameter(Mandatory=$True)]
-		[ValidateNotNullOrEmpty()]
-		[string]$projectBranch)
+		[Int[]]$validationColumns)
 
 	[bool]$isRowValid = ($Null -Ne $row.td -And
 		$row.td.Count -Gt $MandatoryColumnsTotal -And
-		(-Not [string]::IsNullOrWhiteSpace((getRowStatus -row $row -validationColumns $validationColumns -projectBranch $projectBranch))))
+		(-Not [string]::IsNullOrWhiteSpace((getRowStatus -row $row -validationColumns $validationColumns))))
 	If ($showDebugLogs.IsPresent) {
 		[string]$rowDebugInfo = getRowDebugInfo -row $row
 		If ($isRowValid) {
@@ -266,12 +262,8 @@ function getLogTypeForRowBuild() {
 
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
-		[Int[]]$validationColumns,
-
-		[Parameter(Mandatory=$True)]
-		[ValidateNotNullOrEmpty()]
-		[string]$projectBranch)
-	[string]$rowStatus = getRowStatus -row $row -validationColumns $validationColumns -projectBranch $projectBranch
+		[Int[]]$validationColumns)
+	[string]$rowStatus = getRowStatus -row $row -validationColumns $validationColumns
 	[string]$logType = "Warning"
 	[bool]$isSuccessfulBuild = $rowStatus -imatch "^(Passed($($StatusDelimiter))?)+$"
 	If ($isSuccessfulBuild) {
@@ -292,6 +284,82 @@ function getLogTypeForRowBuild() {
 	return $logType
 }
 
+function printRow() {
+	[OutputType([System.Void])]
+	Param(
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[System.Xml.XmlElement]$row,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[string]$prefix,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[Int[]]$validationColumns,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[string]$projectBranch,
+
+		[Parameter(Mandatory=$False)]
+		[AllowNull()]
+		[string]$currentCommit)
+
+	[object[]]$tds = $row.td;
+	[string]$id = $tds[0]
+	[string]$commitHash = getGitCommitHash -row $row -projectBranch $projectBranch
+	[string]$descendantId = $tds[3]
+	[string]$descendantType = $tds[4]
+	[string]$time = $tds[5]
+	[string]$alias = $tds[6]
+	[string]$status = getRowStatus -row $row -validationColumns $validationColumns
+	[string]$latency = $tds[$tds.Count - 2]
+
+	[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
+	# The current commit might be full version, and the build-row commit short, so only check it as a prefix.
+	[bool]$isCurrent = (-Not [string]::IsNullOrEmpty($currentCommit)) -And $currentCommit.StartsWith($commitHash)
+	[bool]$useLogDelimiter = $isCurrent -Or ($relevantAliases -icontains $alias)
+	If ($useLogDelimiter) {
+		LogNewLine
+		Log Info $logDelimiter
+	}
+
+	[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)"
+	[string]$descendantInfo = "-"
+	If (-Not [string]::IsNullOrWhiteSpace($descendantId)) {
+		$descendantInfo = "#$($descendantId)"
+	}
+
+	If (-Not [string]::IsNullOrWhiteSpace($descendantType)) {
+		$descendantInfo	= "$($descendantInfo) (type $($descendantType))"
+	}
+
+	[string]$logType = getLogTypeForRowBuild -row $row -validationColumns $validationColumns
+	[string[]]$additionalEntries = @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
+	If (-Not $skipGitDetails.IsPresent) {
+		# See https://git-scm.com/docs/git-show#_pretty_formats for format descriptions
+		[string[]]$commitInfo = git show -s --format="Author:`t%an (%ae)%nTitle:`t%s%nMerged:`t%ar" $commitHash
+		If (0 -Eq $commitInfo.Count) {
+			$commitInfo = @("Could not find commit information (consider running 'git fetch' first) !")
+		}
+
+		$additionalEntries = $commitInfo + $additionalEntries
+	}
+
+	Log $logType $message -additionalEntries $additionalEntries
+
+	If ($isCurrent) {
+		Log Success "Local master branch is currently on this commit"
+	}
+
+	If ($useLogDelimiter) {
+		Log Info $logDelimiter
+		LogNewLine
+	}
+}
+
 function printAllRows() {
 	[OutputType([System.Void])]
 	Param(
@@ -310,82 +378,6 @@ function printAllRows() {
 		[Parameter(Mandatory=$True)]
 		[ValidateNotNullOrEmpty()]
 		[string]$projectBranch)
-	function printRow() {
-		[OutputType([System.Void])]
-		Param(
-			[Parameter(Mandatory=$True)]
-			[ValidateNotNullOrEmpty()]
-			[System.Xml.XmlElement]$row,
-	
-			[Parameter(Mandatory=$True)]
-			[ValidateNotNullOrEmpty()]
-			[string]$prefix,
-	
-			[Parameter(Mandatory=$True)]
-			[ValidateNotNullOrEmpty()]
-			[Int[]]$validationColumns,
-	
-			[Parameter(Mandatory=$True)]
-			[ValidateNotNullOrEmpty()]
-			[string]$projectBranch,
-	
-			[Parameter(Mandatory=$True)]
-			[AllowNull()]
-			[string]$currentCommit)
-	
-		[object[]]$tds = $row.td;
-		[string]$id = $tds[0]
-		[string]$commitHash = getGitCommitHash -row $row -projectBranch $projectBranch
-		[string]$descendantId = $tds[3]
-		[string]$descendantType = $tds[4]
-		[string]$time = $tds[5]
-		[string]$alias = $tds[6]
-		[string]$status = getRowStatus -row $row -validationColumns $validationColumns -projectBranch $projectBranch
-		[string]$latency = $tds[$tds.Count - 2]
-	
-		[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
-		# The current commit might be full version, and the build-row commit short, so only check it as a prefix.
-		[bool]$isCurrent = (-Not [string]::IsNullOrEmpty($currentCommit)) -And $currentCommit.StartsWith($commitHash)
-		[bool]$useLogDelimiter = $isCurrent -Or ($relevantAliases -icontains $alias)
-		If ($useLogDelimiter) {
-			LogNewLine
-			Log Info $logDelimiter
-		}
-	
-		[string]$message = "$($prefix): ID #$($id) by [$($alias)] @ [$($time)], E2E latency: $($latency)"
-		[string]$descendantInfo = "-"
-		If (-Not [string]::IsNullOrWhiteSpace($descendantId)) {
-			$descendantInfo = "#$($descendantId)"
-		}
-	
-		If (-Not [string]::IsNullOrWhiteSpace($descendantType)) {
-			$descendantInfo	= "$($descendantInfo) (type $($descendantType))"
-		}
-	
-		[string]$logType = getLogTypeForRowBuild -row $row -validationColumns $validationColumns -projectBranch $projectBranch
-		[string[]]$additionalEntries = @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
-		If (-Not $skipGitDetails.IsPresent) {
-			# See https://git-scm.com/docs/git-show#_pretty_formats for format descriptions
-			[string[]]$commitInfo = git show -s --format="Author:`t%an (%ae)%nTitle:`t%s%nMerged:`t%ar" $commitHash
-			If (0 -Eq $commitInfo.Count) {
-				$commitInfo = @("Could not find commit information (consider running 'git fetch' first) !")
-			}
-
-			$additionalEntries = $commitInfo + $additionalEntries
-		}
-
-		Log $logType $message -additionalEntries $additionalEntries
-
-		If ($isCurrent) {
-			Log Success "Local master branch is currently on this commit"
-		}
-
-		If ($useLogDelimiter) {
-			Log Info $logDelimiter
-			LogNewLine
-		}
-	}
-
 	[string]$currentCommit = GetCodeVersion -fullBranchName master -short
 	For ([Int]$rowIndex = 0; $rowIndex -Lt $rows.Count; $rowIndex++) {
 		$row = $rows[$rowIndex]
@@ -446,12 +438,12 @@ Log Info "Found $($validationColumns.Count)/$($tableHeaders.Count) test validati
 # Test validation column map is no longer required, we are only interested in the indexes
 Remove-Variable -Name "validationResultColumnMap"
 
-[System.Xml.XmlElement[]]$allValidBuildRows = $allBuildRows | Where-Object { isRowValid -row $_ -validationColumns $validationColumns -projectBranch $projectBranch }
+[System.Xml.XmlElement[]]$allValidBuildRows = $allBuildRows | Where-Object { isRowValid -row $_ -validationColumns $validationColumns }
 [System.Xml.XmlElement[]]$completedBuildRows = $allValidBuildRows | Where-Object {
-	[string[]]$inProgressStatuses = @("Not Scheduled", "Running")
+	[string[]]$completedStatuses = @("Passed", "Failed")
 	[System.Xml.XmlElement[]]$row = $_
 	[string[]]$completedValidationColumns = $validationColumns |
-		Where-Object { -Not ($inProgressStatuses -icontains $row.td[[Int]$_].InnerText ) }
+		Where-Object { $completedStatuses -icontains $row.td[[Int]$_].InnerText }
 	return $completedValidationColumns.Count -Eq $validationColumns.Count
 }
 
@@ -465,10 +457,27 @@ If (0 -Eq $completedBuildRows.Count) {
 
 Log Info "Found $($completedBuildRows.Count)/$($allBuildRows.Count) build row(s) with completed validations."
 
-[System.Xml.XmlElement[]]$matchingBuildRows = $completedBuildRows | Where-Object { (getLogTypeForRowBuild -row $_ -validationColumns $validationColumns -projectBranch $projectBranch) -Eq "Success" }
+[System.Xml.XmlElement[]]$matchingBuildRows = $completedBuildRows | Where-Object { (getLogTypeForRowBuild -row $_ -validationColumns $validationColumns) -Eq "Success" }
 If ($Null -Eq $matchingBuildRows -Or $matchingBuildRows.Count -Eq 0) {
 	If ($printAllBuildInfo.IsPresent) {
 		printAllRows -rows $allValidBuildRows -validationColumns $validationColumns -projectBranch $projectBranch
+	}
+
+	# Try to find a build with most passed validations.
+	[Int]$bestRowSuccessCount = 0
+	[Int]$bestRowIndex = -1
+	For ([Int]$i = 0; $i -Lt $allValidBuildRows.Count; $i++) {
+		[string]$rowStatus = getRowStatus -row $allValidBuildRows[$i] -validationColumns $validationColumns
+		[Int]$rowSuccessCount = (Select-String -Pattern "Passed" -InputObject $rowStatus -AllMatches).Matches.Count
+		If ($rowSuccessCount -Gt $bestRowSuccessCount) {
+			$bestRowIndex = $i
+			$bestRowSuccessCount = $rowSuccessCount
+		}
+	}
+
+	# As no build was fully successful - print the latest one with most passed validations.
+	If ($bestRowIndex -Ge 0 -And $bestRowSuccessCount -Gt 0) {
+		printRow -row $completedBuildRows[$bestRowIndex] -prefix "Latest build row #$($bestRowIndex)/$($allBuildRows.Count) with $($bestRowSuccessCount)/$($validationColumns.Count) successful validation(s)" -validationColumns $validationColumns -projectBranch $projectBranch
 	}
 
 	ScriptFailure "Did not find any successful builds out of $($allBuildRows.Count) build row(s).$($resultRowsMitigation)"
@@ -512,7 +521,7 @@ If ([string]::IsNullOrWhiteSpace($commitHash)) {
 
 If ($sync.IsPresent) {
 	Log Warning "Syncing to $($commitHash)... Please restart the CoreXT console manually afterwards`n"
-	& "$($PSScriptRoot)\git\merge_branch.ps1" -commit $commitHash
+	& "$($PSScriptRoot)\..\git\merge_branch.ps1" -commit $commitHash -skipRemoteBranchInfoUpdate:($skipGitDetails.IsPresent -Or $global:isBranchInfoUpdated)
 
 	If (ConfirmAction "Delete build folders (for a clean new build)") {
 		delete_build_folders

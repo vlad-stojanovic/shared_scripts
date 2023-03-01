@@ -9,7 +9,7 @@ Param(
 	[string]$provisionedServicesPath)
 
 # Include common helper functions
-. "$($PSScriptRoot)/common/_common.ps1"
+. "$($PSScriptRoot)/../common/_common.ps1"
 
 If (-Not (Test-Path -Path $environmentFilePath)) {
 	ScriptFailure "Environment config file [$($environmentFilePath)] does not exist"
@@ -20,7 +20,6 @@ If (-Not (Test-Path -Path $provisionedServicesPath)) {
 }
 
 [Xml]$environmentXml = Get-Content -Path $environmentFilePath
-[System.Xml.XmlElement[]]$allServerConnectionInfos = $environmentXml.TestShellEnvironment.EnvironmentComponent.ProvisionedServers.CloudServerConnectionInfo
 [Xml]$provisionedServicesXml = Get-Content -Path $provisionedServicesPath
 [System.Xml.XmlElement[]]$allProvisionedServiceInfos = $provisionedServicesXml.ProvisionedServices
 
@@ -64,51 +63,63 @@ function UpdateXmlValue() {
 	}
 }
 
-ForEach ($serverConnectionInfo in $allServerConnectionInfos) {
-	LogNewLine
-	[string]$serverName = $serverConnectionInfo.Name
-	[string]$serverType = $serverConnectionInfo.ServerType
-	[string]$serviceDebugInfo = "'$($serverName)' ($($serverType))"
+[System.Xml.XmlElement[]]$allComponentsWithServers = $environmentXml.TestShellEnvironment.EnvironmentComponent | Where-Object { $_.ProvisionedServers.CloudServerConnectionInfo -Ne $Null }
+ForEach ($component in $allComponentsWithServers) {
+	[string]$serverDnsSuffix = $component.ClusterZone
+	[System.Xml.XmlElement[]]$allServerConnectionInfos = $component.ProvisionedServers.CloudServerConnectionInfo
+	ForEach ($serverConnectionInfo in $allServerConnectionInfos) {
+		LogNewLine
+		[string]$serverName = $serverConnectionInfo.Name
+		[string]$serverType = $serverConnectionInfo.ServerType
+		[string]$serverDnsName = $Null
+		If ([string]::IsNullOrEmpty($serverDnsSuffix)) {
+			$serverDnsName = $serverName
+		} Else {
+			$serverDnsName = "$($serverName).$($serverDnsSuffix)"
+		}
 
-	[System.Xml.XmlElement[]]$targetProvisionedServiceInfos = $Null
-	switch ($serverType) {
-		"PolarisPool" {
-			$targetProvisionedServiceInfos = $allProvisionedServiceInfos.PolarisPools.PolarisPool
-			break
+		[string]$serviceDebugInfo = "'$($serverDnsName)' ($($serverType))"
+
+		[System.Xml.XmlElement[]]$targetProvisionedServiceInfos = $Null
+		switch ($serverType) {
+			"PolarisPool" {
+				$targetProvisionedServiceInfos = $allProvisionedServiceInfos.PolarisPools.PolarisPool
+				break
+			}
+			"LogicalServer" {
+				$targetProvisionedServiceInfos = $allProvisionedServiceInfos.LogicalServers.LogicalServer
+				break
+			}
+			"ManagedServer" {
+				$targetProvisionedServiceInfos = $allProvisionedServiceInfos.ManagedServers.ManagedServer
+				break
+			}
+			default {
+				ScriptFailure "Unknown type for $($serviceDebugInfo)"
+				break
+			}
 		}
-		"LogicalServer" {
-			$targetProvisionedServiceInfos = $allProvisionedServiceInfos.LogicalServers.LogicalServer
-			break
+
+		[System.Xml.XmlElement]$targetProvisionedServiceInfo = $Null
+		If (1 -Eq $targetProvisionedServiceInfos.Count) {
+			$targetProvisionedServiceInfo = $targetProvisionedServiceInfos[0]
+			Log Verbose "Taking the only provisioned $($serverType) type - [$($targetProvisionedServiceInfo.Name)]"
+		} Else {
+			$targetProvisionedServiceInfo = $targetProvisionedServiceInfos |
+				Where-Object { $_.Name -IEq $serverName } |
+				Select-Object -First 1
 		}
-		"ManagedServer" {
-			$targetProvisionedServiceInfos = $allProvisionedServiceInfos.ManagedServers.ManagedServer
-			break
+
+		If ($Null -Eq $targetProvisionedServiceInfo) {
+			ScriptFailure "No info found for $($serviceDebugInfo) in [$($provisionedServicesPath)]"
 		}
-		default {
-			ScriptFailure "Unknown type for $($serviceDebugInfo)"
-			break
-		}
+
+		Log Info "Processing $($serviceDebugInfo)"
+		UpdateXmlValue -element $serverConnectionInfo -propertyName SubscriptionId -newValue $targetProvisionedServiceInfo.SubscriptionId
+		UpdateXmlValue -element $serverConnectionInfo -propertyName Name -newValue $targetProvisionedServiceInfo.Name
+		UpdateXmlValue -element $serverConnectionInfo -propertyName UserName -newValue $targetProvisionedServiceInfo.Username
+		UpdateXmlValue -element $serverConnectionInfo -propertyName Password -newValue $targetProvisionedServiceInfo.Password
 	}
-
-	[System.Xml.XmlElement]$targetProvisionedServiceInfo = $Null
-	If (1 -Eq $targetProvisionedServiceInfos.Count) {
-		$targetProvisionedServiceInfo = $targetProvisionedServiceInfos[0]
-		Log Verbose "Taking the only provisioned $($serverType) type - [$($targetProvisionedServiceInfo.Name)]"
-	} Else {
-		$targetProvisionedServiceInfo = $targetProvisionedServiceInfos |
-			Where-Object { $_.Name -IEq $serverName } |
-			Select-Object -First 1
-	}
-
-	If ($Null -Eq $targetProvisionedServiceInfo) {
-		ScriptFailure "No info found for $($serviceDebugInfo) in [$($provisionedServicesPath)]"
-	}
-
-	Log Info "Processing $($serviceDebugInfo)"
-	UpdateXmlValue -element $serverConnectionInfo -propertyName SubscriptionId -newValue $targetProvisionedServiceInfo.SubscriptionId
-	UpdateXmlValue -element $serverConnectionInfo -propertyName Name -newValue $targetProvisionedServiceInfo.Name
-	UpdateXmlValue -element $serverConnectionInfo -propertyName UserName -newValue $targetProvisionedServiceInfo.Username
-	UpdateXmlValue -element $serverConnectionInfo -propertyName Password -newValue $targetProvisionedServiceInfo.Password
 }
 
 LogNewLine

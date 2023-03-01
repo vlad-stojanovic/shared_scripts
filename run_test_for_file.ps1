@@ -90,7 +90,7 @@ If ($classNames.Length -Gt 0) {
 			}
 		}
 } Else {
-	[string[]]$classOnlyNames = Select-String -Path $fileAbsPath -Pattern "^\s*((public)|(internal))(.*)class\s+([^\s]+)" |
+	[string[]]$classOnlyNames = Select-String -Path $fileAbsPath -Pattern "^\s*((public)|(internal))(.*)class\s+(\w+)" |
 		Select-Object -ExpandProperty Matches |
 		Where-Object { -Not ($_.Groups[4].Value -imatch "abstract") } |
 		ForEach-Object { $_.Groups[5].Value } |
