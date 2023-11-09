@@ -71,14 +71,6 @@ ForEach ($component in $allComponentsWithServers) {
 		LogNewLine
 		[string]$serverName = $serverConnectionInfo.Name
 		[string]$serverType = $serverConnectionInfo.ServerType
-		[string]$serverDnsName = $Null
-		If ([string]::IsNullOrEmpty($serverDnsSuffix)) {
-			$serverDnsName = $serverName
-		} Else {
-			$serverDnsName = "$($serverName).$($serverDnsSuffix)"
-		}
-
-		[string]$serviceDebugInfo = "'$($serverDnsName)' ($($serverType))"
 
 		[System.Xml.XmlElement[]]$targetProvisionedServiceInfos = $Null
 		switch ($serverType) {
@@ -95,7 +87,7 @@ ForEach ($component in $allComponentsWithServers) {
 				break
 			}
 			default {
-				ScriptFailure "Unknown type for $($serviceDebugInfo)"
+				ScriptFailure "Unknown type $($serverType)"
 				break
 			}
 		}
@@ -111,10 +103,17 @@ ForEach ($component in $allComponentsWithServers) {
 		}
 
 		If ($Null -Eq $targetProvisionedServiceInfo) {
-			ScriptFailure "No info found for $($serviceDebugInfo) in [$($provisionedServicesPath)]"
+			ScriptFailure "No info found for '$($serverName)' ($($serverType)) in [$($provisionedServicesPath)]"
 		}
 
-		Log Info "Processing $($serviceDebugInfo)"
+		[string]$serverDnsName = $Null
+		If ([string]::IsNullOrEmpty($serverDnsSuffix)) {
+			$serverDnsName = $targetProvisionedServiceInfo.Name
+		} Else {
+			$serverDnsName = "$($targetProvisionedServiceInfo.Name).$($serverDnsSuffix)"
+		}
+
+		Log Info "Processing '$($serverDnsName)' ($($serverType))"
 		UpdateXmlValue -element $serverConnectionInfo -propertyName SubscriptionId -newValue $targetProvisionedServiceInfo.SubscriptionId
 		UpdateXmlValue -element $serverConnectionInfo -propertyName Name -newValue $targetProvisionedServiceInfo.Name
 		UpdateXmlValue -element $serverConnectionInfo -propertyName UserName -newValue $targetProvisionedServiceInfo.Username

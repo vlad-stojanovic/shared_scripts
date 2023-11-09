@@ -2,9 +2,9 @@
 # and are therefore safe to be used in other functions, scripts, etc.
 
 # Include common safe helper functions
-. "$($PSScriptRoot)/../common/_common_safe.ps1"
+. "$($PSScriptRoot)/_common_safe.ps1"
 
-function find_absolute_path_in_start_dir() {
+function FindAbsolutePathInStartDir() {
 	[OutputType([string])]
 	Param(
 		[Parameter(Mandatory=$True, HelpMessage="Starting/root directory to search the file in")]
@@ -68,7 +68,7 @@ function find_absolute_path_in_start_dir() {
 	return $fileAbsPath
 }
 
-function find_project_for_file_in_start_dir() {
+function FindProjectForFileInStartDir() {
 	[OutputType([string])]
 	Param(
 		[Parameter(Mandatory=$True, HelpMessage="Starting/root directory to search the file in")]
@@ -82,7 +82,7 @@ function find_project_for_file_in_start_dir() {
 	# Getting absolute paths.
 	# Fixing the issue of potentially incorrect path separators i.e. \ vs /
 	$startDir = Resolve-Path -Path $startDir -ErrorAction Stop
-	[string]$fileAbsPath = find_absolute_path_in_start_dir -startDir $startDir -filePath $filePath
+	[string]$fileAbsPath = FindAbsolutePathInStartDir -startDir $startDir -filePath $filePath
 	If ([string]::IsNullOrWhiteSpace($fileAbsPath)) {
 		Log Error "Could not find an absolute file path for [$($filePath)] in [$($startDir)]"
 		return $Null

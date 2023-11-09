@@ -1,6 +1,9 @@
 Param(
 	[Parameter(Mandatory=$False)]
-	[string]$entitySubPath = $Null)
+	[string]$entitySubPath = $Null,
+
+	[Parameter(Mandatory=$False)]
+	[switch]$alwaysLog)
 
 # Include git helper functions
 . "$($PSScriptRoot)/_git_common.ps1"
@@ -21,12 +24,12 @@ LogNewLine
 $count=0
 ForEach ($diffFile in $diffFiles) {
 	$count++
-	LogNewLine
-	Log Info "File #$($count)/$($diffFiles.Count) @ [$($diffFile)]"
+	If ($alwaysLog.IsPresent) { LogNewLine }
+	If ($alwaysLog.IsPresent) { Log Info "File #$($count)/$($diffFiles.Count) @ [$($diffFile)]" }
 	If (-Not [string]::IsNullOrWhiteSpace($entitySubPath)) {
-		If ($diffFile -inotmatch "(^|[\/])$($entitySubPath)($|[\/])") {
-			Log Verbose "not matching path pattern [$entitySubPath]" -indentLevel 1
-			continue	
+		If ($diffFile -inotmatch "(^|[\/])$($entitySubPath.Trim())($|[\/])") {
+			If ($alwaysLog.IsPresent) { Log Verbose "not matching path pattern [$entitySubPath]" -indentLevel 1 }
+			continue
 		}
 	}
 
@@ -39,8 +42,8 @@ ForEach ($diffFile in $diffFiles) {
 			RunGitCommand "rm" -parameters @($quotedFilePath)
 		}
 
-		Log Success "Reset file [$($fileName)]" -indentLevel 1
+		If ($alwaysLog.IsPresent) { Log Success "Reset file [$($fileName)]" -indentLevel 1 }
 	} Else {
-		Log Verbose "Skipping reset of file [$($fileName)]" -indentLevel 1
+		If ($alwaysLog.IsPresent) { Log Verbose "Skipping reset of file [$($fileName)]" -indentLevel 1 }
 	}
 }

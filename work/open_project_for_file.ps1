@@ -18,10 +18,11 @@ Param(
 
 # Include common helper functions
 . "$($PSScriptRoot)/../common/_common.ps1"
-# Include find-project function
-. "$($PSScriptRoot)/find_file_common_safe.ps1"
 
-[string]$projectPath = find_project_for_file_in_start_dir -startDir $startDir -filePath $filePath
+# Include safe file-finding functions
+. "$($PSScriptRoot)/../common/_find_file_common_safe.ps1"
+
+[string]$projectPath = FindProjectForFileInStartDir -startDir $startDir -filePath $filePath
 If ([string]::IsNullOrWhiteSpace($projectPath)) {
 	ScriptFailure "Could not find project for file [$($filePath)] in [$($startDir)]"
 }

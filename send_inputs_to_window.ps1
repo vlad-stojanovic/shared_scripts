@@ -19,8 +19,11 @@ Param(
 	[Parameter(Mandatory=$True, HelpMessage="Virtual key codes (raw values) to send to the target window. See https://docs.microsoft.com/windows/win32/inputdev/virtual-key-codes")]
 	[UInt16[]]$keyCodes,
 
-	[Parameter(Mandatory=$False, HelpMessage="Number of key iterations to perform")]
-	[UInt16]$keyIterations = 1)
+	[Parameter(Mandatory=$False, HelpMessage="Number of times to repeat sending the provided key codes within a single cycle")]
+	[UInt16]$keyIterations = 1,
+
+	[Parameter(Mandatory=$False, HelpMessage="Number of seconds to wait between cycles are repeated. If the value is less than or equal to zero then do no repeats")]
+	[Int32]$repeatCycleWaitTimeS = 0)
 
 # Include common helper functions
 . "$($PSScriptRoot)/common/_common.ps1"
@@ -356,7 +359,7 @@ namespace VStojanovic.UICommands
 			return true;
 		}
 
-		public static long FindTargetWindowForThreadId(int threadId, string targetWindowTitle)
+		public static long[] FindTargetWindowForThreadId(int threadId, string targetWindowTitle)
 		{
 			EnumWindowParams ewParams = new EnumWindowParams(targetWindowTitle);
 			GCHandle gcHandle = GCHandle.Alloc(ewParams);
@@ -374,30 +377,33 @@ namespace VStojanovic.UICommands
 
 			if (ewParams.WindowList.Any())
 			{
-				return ewParams.WindowList[0].ToInt64();
+				return ewParams
+					.WindowList
+					.Select(handle => handle.ToInt64())
+					.ToArray();
 			}
 
-			return 0L;
+			return null;
 		}
 
-		public static long FindTargetWindow(Process process, string targetWindowTitle)
+		public static long[] FindTargetWindow(Process process, string targetWindowTitle)
 		{
-			long processResult = FindTargetWindowForThreadId(process.Id, targetWindowTitle);
-			if (processResult != 0)
+			long[] processResult = FindTargetWindowForThreadId(process.Id, targetWindowTitle);
+			if (processResult != null && processResult.Any())
 			{
 				return processResult;
 			}
 
 			foreach (ProcessThread thread in process.Threads)
 			{
-				long threadResult = FindTargetWindowForThreadId(thread.Id, targetWindowTitle);
-				if (threadResult != 0)
+				long[] threadResult = FindTargetWindowForThreadId(thread.Id, targetWindowTitle);
+				if (threadResult != null && threadResult.Any())
 				{
 					return threadResult;
 				}
 			}
 
-			return 0L;
+			return null;
 		}
 	}
 }
@@ -405,41 +411,59 @@ namespace VStojanovic.UICommands
 
 Add-Type -TypeDefinition $csSource -Language CSharp
 
-[System.Diagnostics.Process[]]$processes = Get-Process -Name $processName -ErrorAction Ignore |
-	Where-Object { [string]::IsNullOrEmpty($mainProcessWindowTitleInfix) -Or $_.MainWindowTitle.Contains($mainProcessWindowTitleInfix) }
-If ($processes.Count -Gt 1) {
-	Log Warning "Found $($processes.Count) matching processes"
-} ElseIf ($processes.Count -Eq 0) {
-	ScriptFailure "Did not find any matching processes [$($processName)]. Add correct filters for process name and window title"
-}
-
-[int]$targetWindowsProcessed = 0
-ForEach ($process in $processes) {
-	[string]$processInfo = "#$($process.Id) [$($processName)] window handle [$($process.MainWindowHandle)] title [$($process.MainWindowTitle)]"
-	[string[]]$logEntries = @($processInfo)
-	[long]$targetWindowHandle = [VStojanovic.UICommands.PSWrapper]::FindTargetWindow($process, $targetWindowTitle);
-	If ($targetWindowHandle -Eq 0) {
-		Log Warning "Could not find $($targetWindowDescription) window open within" -additionalEntries $logEntries
-		continue
+While ($True) {
+	[System.Diagnostics.Process[]]$processes = Get-Process -Name $processName -ErrorAction Ignore |
+		Where-Object { [string]::IsNullOrEmpty($mainProcessWindowTitleInfix) -Or $_.MainWindowTitle.Contains($mainProcessWindowTitleInfix) }
+	If ($processes.Count -Gt 1) {
+		Log Warning "Found $($processes.Count) matching processes"
 	}
 
-	[bool]$result = [VStojanovic.UICommands.PSWrapper]::SetForegroundWindowWrapper($targetWindowHandle)
-	$result = [VStojanovic.UICommands.PSWrapper]::ShowWindowWrapper($targetWindowHandle, 5)
+	If ($processes.Count -Gt 0) {
+		[int]$targetWindowsProcessed = 0
+		ForEach ($process in $processes) {
+			[string]$processInfo = "#$($process.Id) [$($processName)] window handle [$($process.MainWindowHandle)] title [$($process.MainWindowTitle)]"
+			[string[]]$processLogEntries = @($processInfo)
+			[long[]]$targetWindowHandles = [VStojanovic.UICommands.PSWrapper]::FindTargetWindow($process, $targetWindowTitle);
+			If ($targetWindowHandles.Count -Eq 0) {
+				Log Warning "Could not find $($targetWindowDescription) window open within" -additionalEntries $processLogEntries
+				continue
+			}
 
-	$logEntries = @("$($processInfo) -> #$($targetWindowHandle)")
-	[int]$keyIterationsSent = [VStojanovic.UICommands.PSWrapper]::SendInputsToTargetWindow($targetWindowHandle, $keyCodes, $keyIterations);
-	If ($keyIterations -Eq $keyIterationsSent) {
-		Log Success "Sent $($keyIterations) key command(s) to" -additionalEntries $logEntries
-		$targetWindowsProcessed++
-	} ElseIf ($keyIterationsSent -Gt 0) {
-		Log Warning "Sent $($keyIterationsSent)/$($keyIterations) key command(s) to" -additionalEntries $logEntries
+			If ($targetWindowHandles.Count -Gt 1) {
+				Log Warning "Found $($targetWindowHandles.Count) $($targetWindowDescription) windows within" -additionalEntries $processLogEntries
+			}
+
+			ForEach ($targetWindowHandle in $targetWindowHandles) {
+				[bool]$result = [VStojanovic.UICommands.PSWrapper]::SetForegroundWindowWrapper($targetWindowHandle)
+				$result = [VStojanovic.UICommands.PSWrapper]::ShowWindowWrapper($targetWindowHandle, 5)
+
+				[string]$windowLogEntries = @("$($processInfo) -> #$($targetWindowHandle)")
+				[int]$keyIterationsSent = [VStojanovic.UICommands.PSWrapper]::SendInputsToTargetWindow($targetWindowHandle, $keyCodes, $keyIterations);
+				If ($keyIterations -Eq $keyIterationsSent) {
+					Log Success "Sent $($keyIterations) key command(s) to" -additionalEntries $windowLogEntries
+					$targetWindowsProcessed++
+				} ElseIf ($keyIterationsSent -Gt 0) {
+					Log Warning "Sent $($keyIterationsSent)/$($keyIterations) key command(s) to" -additionalEntries $windowLogEntries
+				} Else {
+					Log Error "Failed to send key command(s) to" -additionalEntries $windowLogEntries
+				}
+			}
+		}
+
+		If ($targetWindowsProcessed -Eq 0) {
+			Log Warning "No $($targetWindowDescription) windows processed in $($processes.Count) [$($processName)] process(es)"
+		} Else {
+			Log Warning "Check manually that the $($targetWindowsProcessed) window(s) have been processed correctly"
+		}
 	} Else {
-		Log Error "Failed to send key command(s) to" -additionalEntries $logEntries
+		Log Warning "Did not find any matching processes [$($processName)]. Add correct filters for process name and window title"
+	}
+
+	If ($repeatCycleWaitTimeS -Gt 0) {
+		Log Verbose "Waiting for $($repeatCycleWaitTimeS)s before another cycle..."
+		LogNewLine
+		Start-Sleep -Seconds $repeatCycleWaitTimeS
+	} Else {
+		break
 	}
 }
-
-If ($targetWindowsProcessed -Eq 0) {
-	ScriptFailure "No $($targetWindowDescription) windows processed in $($processes.Count) [$($processName)] process(es)"
-}
-
-Log Warning "Check manually that the target window has been processed correctly"

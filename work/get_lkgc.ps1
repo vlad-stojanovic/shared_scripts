@@ -1,5 +1,5 @@
 Param(
-	[Parameter(Mandatory=$False, HelpMessage="Validation gate")]
+	[Parameter(Mandatory=$False, HelpMessage="Validation gate (ES team enforces test pass rate on `"Auto-Functionals`" gate)")]
 	[ValidateSet(
 		, "Auto-Functionals"
 		, "Auto-Functionals/CI"
@@ -11,7 +11,7 @@ Param(
 		, "CT Trident"
 		, "DW Gen3"
 	)]
-	[string]$validationGate = "Auto-Functionals/CI",
+	[string]$validationGate = "Auto-Functionals",
 
 	[Parameter(Mandatory=$False, HelpMessage="Validation key override, explicitly set (>= 0) will override `$validationGate")]
 	[Int16]$validationKeyOverride = -1,
@@ -22,9 +22,18 @@ Param(
 	[Parameter(Mandatory=$False, HelpMessage="Relevant aliases whose builds should be highlighted")]
 	[string[]]$relevantAliases = @("AVAdmin", $env:USERNAME),
 
-	[Parameter(Mandatory=$False, HelpMessage="Number of past hours (to look back) in the validation report")]
+	[Parameter(Mandatory=$False, HelpMessage="Number of past hours (to look back) in the validation report. ES team enforces 5 day (120h) maximum for PR policy.")]
 	[ValidateScript({ $_ -Ge 12 })]
-	[UInt16]$lookbackHours = 24,
+	[UInt16]$lookbackHours = 108,
+
+	[Parameter(Mandatory=$False, HelpMessage="Test pass rate threshold - ignored if set to 0. ES team enforces a minimum for PR policy, which is subject to change, but on 2023-08-28 it was 99.6%.")]
+	[ValidateScript({ $_ -Ge 0 -And $_ -Le 100 })]
+	[Double]$testPassRateThreshold = 0,
+
+	# We want to have results with test pass rates included, so do not allow 0 here.
+	[Parameter(Mandatory=$False, HelpMessage="Test pass rate format - 0 (None) e.g. 'Failed', 1 (Actual) e.g. 'Failed (99.5%)', 2 (Projected) e.g. 'Failed 99.62'")]
+	[ValidateSet(1, 2)]
+	[UInt16]$testPassRateFormat = 1,
 
 	[Parameter(Mandatory=$False, HelpMessage="Project to search LKGC (last-known-good-changeset) for")]
 	[ValidateNotNullOrEmpty()]
@@ -60,6 +69,8 @@ $ErrorActionPreference = "Stop"
 [string]$StatusDelimiter = " / "
 
 [bool]$global:isBranchInfoUpdated = $False
+
+[string]$TestPassRateRegex = "[\s\(\)\d\.%]*";
 
 function getBuildStatusTable() {
 	Param(
@@ -118,7 +129,7 @@ function getBuildStatusTable() {
 	}
 
 	$cacheValidityInMinutes = 60;
-	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "../cache/build_status_table_cache_$($projectBranch)_$($validationKey)-$($validationDimension)_$($lookbackHours)h.txt"
+	$cacheFilePath = Join-Path -Path $PSScriptRoot -ChildPath "../cache/build_status_table_cache_$($projectBranch)_V$($validationKey)-$($validationDimension)_T$($testPassRateFormat)_L$($lookbackHours)h.txt"
 	If (Test-Path -Path $cacheFilePath) {
 		$creationTime = (Get-Item -Path $cacheFilePath).CreationTime
 		$cacheFileContent = Get-Content -Path $cacheFilePath
@@ -137,7 +148,7 @@ function getBuildStatusTable() {
 	}
 
 	[string]$baseUri = "https://troubleshooter.redmond.corp.microsoft.com/CVReport.aspx"
-	[string]$targetUri = "$($baseUri)?LastHours=$($lookbackHours)&PassRate=0&Branch=$($projectBranch)&Title=$($projectBranch)&Key=$($validationKey)&Dim=$($validationDimension)"
+	[string]$targetUri = "$($baseUri)?LastHours=$($lookbackHours)&PassRate=$($testPassRateFormat)&Branch=$($projectBranch)&Title=$($projectBranch)&Key=$($validationKey)&Dim=$($validationDimension)"
 
 	Log Verbose "[$($projectBranch)] Downloading DS CI status from [$($targetUri)]"
 	$html = (Invoke-WebRequest -Uri $targetUri).Content
@@ -253,6 +264,52 @@ function isRowValid() {
 	return $isRowValid
 }
 
+function isRowBuildTestPassRateSuccessful() {
+	[OutputType([bool])]
+	Param(
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[System.Xml.XmlElement]$row,
+
+		[Parameter(Mandatory=$True)]
+		[ValidateNotNullOrEmpty()]
+		[Int[]]$validationColumns)
+	If ($testPassRateThreshold -Le 0) {
+		# Minimum test pass rate threshold not defined - mark as success
+		return $True
+	}
+
+	[string[]]$buildStatuses = $validationColumns | ForEach-Object { $row.td[[Int]$_].InnerText }
+	If ($buildStatuses.Count -Eq 0) {
+		# No build statuses found - mark as failed (i.e. under pass rate threshold)
+		return $False
+	}
+
+	For ([Int]$i = 0; $i -Lt $buildStatuses.Count; $i++) {
+		[string]$buildStatusInfo = "Build status #$($i) '$($buildStatuses[$i])'"
+		[string]$passRateMatch = [System.Text.RegularExpressions.Regex]::Match($buildStatuses[$i],'(\d+\.?\d*)').Groups[1].Value
+		If ([string]::IsNullOrWhiteSpace($passRateMatch)) {
+			# No pass rate found for build status - mark as failed (i.e. under pass rate threshold)
+			If ($showDebugLogs.IsPresent) { Log Verbose "$($buildStatusInfo) does not have a test pass rate" }
+			return $False
+		}
+
+		[Double]$passRateValue = 0
+		If (-Not [Double]::TryParse($passRateMatch, [ref]$passRateValue)) {
+			If ($showDebugLogs.IsPresent) { Log Warning "$($buildStatusInfo) has an invalid test pass rate '$($passRateMatch)'" }
+			return $False
+		}
+
+		If ($passRateValue -Lt $testPassRateThreshold) {
+			If ($showDebugLogs.IsPresent) { Log Verbose "$($buildStatusInfo) has a test pass rate $($passRateValue) under threshold $($testPassRateThreshold)" }
+			return $False
+		}
+	}
+
+	If ($showDebugLogs.IsPresent) { Log Success "Build status $(getRowStatus -row $row -validationColumns $validationColumns) has a test pass rate over threshold $($testPassRateThreshold)" }
+	return $True
+}
+
 function getLogTypeForRowBuild() {
 	[OutputType([string])]
 	Param(
@@ -265,7 +322,7 @@ function getLogTypeForRowBuild() {
 		[Int[]]$validationColumns)
 	[string]$rowStatus = getRowStatus -row $row -validationColumns $validationColumns
 	[string]$logType = "Warning"
-	[bool]$isSuccessfulBuild = $rowStatus -imatch "^(Passed($($StatusDelimiter))?)+$"
+	[bool]$isSuccessfulBuild = $rowStatus -imatch "^(Passed$($TestPassRateRegex)($($StatusDelimiter))?)+$"
 	If ($isSuccessfulBuild) {
 		$logType = "Success"
 	} ElseIf ($rowStatus.Contains("Failed")) {
@@ -305,7 +362,10 @@ function printRow() {
 
 		[Parameter(Mandatory=$False)]
 		[AllowNull()]
-		[string]$currentCommit)
+		[string]$currentCommit,
+
+		[Parameter(Mandatory=$False)]
+		[switch]$alwaysLog)
 
 	[object[]]$tds = $row.td;
 	[string]$id = $tds[0]
@@ -317,9 +377,32 @@ function printRow() {
 	[string]$status = getRowStatus -row $row -validationColumns $validationColumns
 	[string]$latency = $tds[$tds.Count - 2]
 
-	[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
+	[string]$logType = getLogTypeForRowBuild -row $row -validationColumns $validationColumns
+
+	[string]$testPassRateStatus = $Null
+	If ($testPassRateThreshold -Gt 0) {
+		[string]$testPassRateStatus = "under"
+		If (isRowBuildTestPassRateSuccessful -row $row -validationColumns $validationColumns) {
+			$testPassRateStatus = "over"
+		}
+		[string]$testPassRateType = switch ($testPassRateFormat) {
+			0 { "none"; break }
+			1 { "actual"; break }
+			2 { "projected"; break }
+			default { "unknown"; break }
+		}
+		$status = "$($status) - $($testPassRateStatus) '$($testPassRateType)' test pass rate threshold ($($testPassRateThreshold)%)"
+	}
+
 	# The current commit might be full version, and the build-row commit short, so only check it as a prefix.
 	[bool]$isCurrent = (-Not [string]::IsNullOrEmpty($currentCommit)) -And $currentCommit.StartsWith($commitHash)
+
+	If (-Not ($alwaysLog.IsPresent -Or $showDebugLogs.IsPresent -Or $logType -IEq "Success" -Or $testPassRateStatus -IEq "over" -Or $isCurrent)) {
+		# This commit is not really relevant - do not explicitly log it
+		return
+	}
+
+	[string]$logDelimiter = "# # # # # # # # # # # # # # # # # # # # #"
 	[bool]$useLogDelimiter = $isCurrent -Or ($relevantAliases -icontains $alias)
 	If ($useLogDelimiter) {
 		LogNewLine
@@ -336,7 +419,6 @@ function printRow() {
 		$descendantInfo	= "$($descendantInfo) (type $($descendantType))"
 	}
 
-	[string]$logType = getLogTypeForRowBuild -row $row -validationColumns $validationColumns
 	[string[]]$additionalEntries = @("Status: $($status)", "Descendant: $($descendantInfo)", "Commit hash [$($commitHash)]")
 	If (-Not $skipGitDetails.IsPresent) {
 		# See https://git-scm.com/docs/git-show#_pretty_formats for format descriptions
@@ -381,8 +463,9 @@ function printAllRows() {
 	[string]$currentCommit = GetCodeVersion -fullBranchName master -short
 	For ([Int]$rowIndex = 0; $rowIndex -Lt $rows.Count; $rowIndex++) {
 		$row = $rows[$rowIndex]
-		printRow -row $row -prefix "#$($rowIndex)/$($rows.Count)" -validationColumns $validationColumns -projectBranch $projectBranch -currentCommit $currentCommit
-		If ($row -Eq $rowToStopAt) {
+		[bool]$isLastRow = $row -Eq $rowToStopAt
+		printRow -row $row -prefix "#$($rowIndex)/$($rows.Count)" -validationColumns $validationColumns -projectBranch $projectBranch -currentCommit $currentCommit -alwaysLog:$isLastRow
+		If ($isLastRow) {
 			break
 		}
 	}
@@ -396,7 +479,7 @@ $parsedXml = [XML]$buildStatusTable
 [Int]$tableHeaderRowIndex = 1
 [Int]$firstBuildRowIndex = $tableHeaderRowIndex + 1
 [string]$increaseLookbackMitigation = "increase `$lookbackHours value (currently $($lookbackHours) hours)"
-[string]$resultRowsMitigation = "`nTry to:`n`t- $($increaseLookbackMitigation) or`n`t- check the URI manually (is the logic in this script wrong?)."
+[string]$resultRowsMitigation = "`nTry to:`n`t- $($increaseLookbackMitigation) or`n`t- decrease (if possible) test pass rate threshold (currently $($testPassRateThreshold)%) or`n`t- check the URI manually (is the logic in this script wrong?)."
 If ($allRows.Length -Eq $firstBuildRowIndex) {
 	ScriptFailure "Did not find any builds.$($resultRowsMitigation)"
 } ElseIf (-Not ($allRows.Length -Gt $firstBuildRowIndex)) {
@@ -440,10 +523,10 @@ Remove-Variable -Name "validationResultColumnMap"
 
 [System.Xml.XmlElement[]]$allValidBuildRows = $allBuildRows | Where-Object { isRowValid -row $_ -validationColumns $validationColumns }
 [System.Xml.XmlElement[]]$completedBuildRows = $allValidBuildRows | Where-Object {
-	[string[]]$completedStatuses = @("Passed", "Failed")
+	[string]$completedStatusesRegex = "((Passed)|(Failed))$($TestPassRateRegex)"
 	[System.Xml.XmlElement[]]$row = $_
 	[string[]]$completedValidationColumns = $validationColumns |
-		Where-Object { $completedStatuses -icontains $row.td[[Int]$_].InnerText }
+		Where-Object { $row.td[[Int]$_].InnerText -imatch $completedStatusesRegex }
 	return $completedValidationColumns.Count -Eq $validationColumns.Count
 }
 
@@ -457,7 +540,11 @@ If (0 -Eq $completedBuildRows.Count) {
 
 Log Info "Found $($completedBuildRows.Count)/$($allBuildRows.Count) build row(s) with completed validations."
 
-[System.Xml.XmlElement[]]$matchingBuildRows = $completedBuildRows | Where-Object { (getLogTypeForRowBuild -row $_ -validationColumns $validationColumns) -Eq "Success" }
+[System.Xml.XmlElement[]]$matchingBuildRows = $completedBuildRows |
+	Where-Object {
+		(getLogTypeForRowBuild -row $_ -validationColumns $validationColumns) -Eq "Success" -And
+		(isRowBuildTestPassRateSuccessful -row $_ -validationColumns $validationColumns)
+	}
 If ($Null -Eq $matchingBuildRows -Or $matchingBuildRows.Count -Eq 0) {
 	If ($printAllBuildInfo.IsPresent) {
 		printAllRows -rows $allValidBuildRows -validationColumns $validationColumns -projectBranch $projectBranch
@@ -477,7 +564,7 @@ If ($Null -Eq $matchingBuildRows -Or $matchingBuildRows.Count -Eq 0) {
 
 	# As no build was fully successful - print the latest one with most passed validations.
 	If ($bestRowIndex -Ge 0 -And $bestRowSuccessCount -Gt 0) {
-		printRow -row $completedBuildRows[$bestRowIndex] -prefix "Latest build row #$($bestRowIndex)/$($allBuildRows.Count) with $($bestRowSuccessCount)/$($validationColumns.Count) successful validation(s)" -validationColumns $validationColumns -projectBranch $projectBranch
+		printRow -row $allValidBuildRows[$bestRowIndex] -prefix "Latest build row #$($bestRowIndex)/$($allBuildRows.Count) with $($bestRowSuccessCount)/$($validationColumns.Count) successful validation(s)" -validationColumns $validationColumns -projectBranch $projectBranch -alwaysLog
 	}
 
 	ScriptFailure "Did not find any successful builds out of $($allBuildRows.Count) build row(s).$($resultRowsMitigation)"

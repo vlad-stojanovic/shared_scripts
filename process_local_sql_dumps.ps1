@@ -1,9 +1,7 @@
 Param(
 	[Parameter(Mandatory=$False)]
-	[string[]]$dumpFolders = @(
-		, "$($env:USERPROFILE)\AppData\Local\CrashDumps"
-		, "$($env:USERPROFILE)\AppData\Local\Temp"
-		, "$($env:ProgramData)\Microsoft\Windows\WER\ReportQueue"),
+	[AllowEmptyCollection()]
+	[string[]]$additionalDumpFolders = @(),
 
 	[Parameter(Mandatory=$False)]
 	[ValidateNotNullOrEmpty()]
@@ -22,6 +20,14 @@ Param(
 
 # Include common helper functions
 . "$($PSScriptRoot)/common/_common.ps1"
+
+[string[]]$dumpFolders = @(
+	, "$($env:USERPROFILE)\AppData\Local\CrashDumps"
+	, "$($env:USERPROFILE)\AppData\Local\Temp"
+	, "$($env:ProgramData)\Microsoft\Windows\WER\ReportQueue")
+If ($additionalDumpFolders.Count -Gt 0) {
+	$dumpFolders += $additionalDumpFolders
+}
 
 # Search for dumps
 [HashTable]$resultMap = @{}

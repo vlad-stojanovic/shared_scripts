@@ -26,13 +26,17 @@ Param(
 	[ValidateSet("/includefull", "/includeextended")]
 	[string]$includeOption = "/includefull",
 
+	[Parameter(Mandatory=$False, HelpMessage="Whether the tests should be run in RETAIL mode")]
+	[switch]$retail,
+
 	[Parameter(Mandatory=$False, HelpMessage="Print all the info during script execution, w/o actually running any commands")]
 	[switch]$dryRun)
 
 # Include common helper functions
 . "$($PSScriptRoot)/common/_common.ps1"
-# Include find-project function
-. "$($PSScriptRoot)/work/find_file_common_safe.ps1"
+
+# Include safe file-finding functions
+. "$($PSScriptRoot)/common/_find_file_common_safe.ps1"
 
 function find_first_match() {
 	[OutputType([string])]
@@ -57,12 +61,12 @@ function find_first_match() {
 	return $matches[0]
 }
 
-[string]$fileAbsPath = find_absolute_path_in_start_dir -startDir $startDir -filePath $filePath 
+[string]$fileAbsPath = FindAbsolutePathInStartDir -startDir $startDir -filePath $filePath 
 If ([string]::IsNullOrWhiteSpace($fileAbsPath)) {
 	ScriptFailure "No test file found"
 }
 
-[string]$projectPath = find_project_for_file_in_start_dir -startDir $startDir -filePath $fileAbsPath
+[string]$projectPath = FindProjectForFileInStartDir -startDir $startDir -filePath $fileAbsPath
 If ([string]::IsNullOrWhiteSpace($projectPath)) {
 	ScriptFailure "No test project found"
 }
@@ -120,6 +124,10 @@ For ([Uint16]$ci = 0; $ci -Lt $classNames.Length; $ci++) {
 		}
 
 		$testCommand = "$($testCommand) /testId $($testName)"
+	}
+
+	If ($retail.IsPresent) {
+		$testCommand = "$($testCommand) /retail"
 	}
 
 	Log Info "$($classInfo) command:" -additionalEntries @("$($testCommand)`n")
